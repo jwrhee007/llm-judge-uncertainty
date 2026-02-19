@@ -21,12 +21,21 @@ data/raw/
 data/processed/*.jsonl
 
 # --- Results (regeneratable) ---
-results/logs/*.jsonl
-results/logs/*.json
+results/logs/
+!results/logs/.gitkeep
+
+# -- BatchAPI artifacts
+batch_input_*.jsonl
+batch_output_*.jsonl
+*_batch_*.jsonl
 
 # --- Jupyter ---
 .ipynb_checkpoints/
 *.ipynb_metadata
+
+# --- Large intermediate data ---
+data/processed/
+!data/processed/sample*.jsonl
 
 # --- IDE ---
 # .vscode/ is committed (project-level settings)
