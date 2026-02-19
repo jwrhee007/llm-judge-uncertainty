@@ -1,0 +1,34 @@
+{
+  "entropy_vs_answer_category": {
+    "test": "Kruskal-Wallis",
+    "statistic": NaN,
+    "p_value": NaN,
+    "group_means": {
+      "confusing_wrong": 0.0,
+      "correct": 0.0,
+      "obvious_wrong": 0.0
+    },
+    "group_medians": {
+      "confusing_wrong": 0.0,
+      "correct": 0.0,
+      "obvious_wrong": 0.0
+    }
+  },
+  "flip_rate_vs_answer_category": {
+    "test": "Kruskal-Wallis",
+    "statistic": NaN,
+    "p_value": NaN,
+    "group_means": {
+      "confusing_wrong": 0.0,
+      "correct": 0.0,
+      "obvious_wrong": 0.0
+    }
+  },
+  "entropy_vs_correctness": {
+    "test": "Mann-Whitney U",
+    "statistic": 22.0,
+    "p_value": 1.0,
+    "correct_mean": 0.0,
+    "incorrect_mean": 0.0
+  }
+}

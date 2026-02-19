@@ -1,0 +1,34 @@
+{
+  "entropy_vs_answer_category": {
+    "test": "Kruskal-Wallis",
+    "statistic": 51.09557935848471,
+    "p_value": 8.03037668591687e-12,
+    "group_means": {
+      "confusing_wrong": 0.005348876125036857,
+      "correct": 0.07377073787698948,
+      "obvious_wrong": 0.0034657359027997266
+    },
+    "group_medians": {
+      "confusing_wrong": 0.0,
+      "correct": 0.0,
+      "obvious_wrong": 0.0
+    }
+  },
+  "flip_rate_vs_answer_category": {
+    "test": "Kruskal-Wallis",
+    "statistic": 51.06844238659286,
+    "p_value": 8.140079305294164e-12,
+    "group_means": {
+      "confusing_wrong": 0.002,
+      "correct": 0.034333333333333334,
+      "obvious_wrong": 0.0025
+    }
+  },
+  "entropy_vs_correctness": {
+    "test": "Mann-Whitney U",
+    "statistic": 30351.0,
+    "p_value": 0.1292897455709512,
+    "correct_mean": 0.02499670011893548,
+    "incorrect_mean": 0.01504864266248914
+  }
+}

@@ -1,0 +1,22 @@
+{
+    "recommendations": [
+        // Python 필수
+        "ms-python.python",
+        "ms-python.debugpy",
+
+        // Linting & Formatting
+        "charliermarsh.ruff",
+
+        // Jupyter
+        "ms-toolsai.jupyter",
+
+        // YAML (config 편집)
+        "redhat.vscode-yaml",
+
+        // Git
+        "eamodio.gitlens",
+
+        // 편의
+        "ms-python.pylance"
+    ]
+}

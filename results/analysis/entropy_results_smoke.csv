@@ -1,0 +1,16 @@
+question_id,answer_category,semantic_entropy,normalized_entropy,active_clusters,flip_rate,majority_verdict,n_trials,p_correct,p_incorrect,p_unsure,answer_type_ner,question_length,context_length
+bt_2111,confusing_wrong,-0.0,0.0,1,0.0,INCORRECT,3,0.0,1.0,0.0,LOCATION,6,2000
+bt_2111,correct,-0.0,0.0,1,0.0,CORRECT,3,1.0,0.0,0.0,LOCATION,6,2000
+bt_2111,obvious_wrong,-0.0,0.0,1,0.0,INCORRECT,3,0.0,1.0,0.0,LOCATION,6,2000
+odql_5884,confusing_wrong,-0.0,0.0,1,0.0,INCORRECT,3,0.0,1.0,0.0,OTHER,10,2000
+odql_5884,correct,-0.0,0.0,1,0.0,CORRECT,3,1.0,0.0,0.0,OTHER,10,2000
+odql_5884,obvious_wrong,-0.0,0.0,1,0.0,INCORRECT,3,0.0,1.0,0.0,OTHER,10,2000
+qb_1253,confusing_wrong,-0.0,0.0,1,0.0,INCORRECT,3,0.0,1.0,0.0,PERSON,11,2000
+qb_1253,correct,-0.0,0.0,1,0.0,INCORRECT,3,0.0,1.0,0.0,PERSON,11,2000
+qb_1253,obvious_wrong,-0.0,0.0,1,0.0,INCORRECT,3,0.0,1.0,0.0,PERSON,11,2000
+qw_1989,confusing_wrong,-0.0,0.0,1,0.0,INCORRECT,3,0.0,1.0,0.0,OTHER,10,2000
+qw_1989,correct,-0.0,0.0,1,0.0,CORRECT,3,1.0,0.0,0.0,OTHER,10,2000
+qw_1989,obvious_wrong,-0.0,0.0,1,0.0,INCORRECT,3,0.0,1.0,0.0,OTHER,10,2000
+sfq_25100,confusing_wrong,-0.0,0.0,1,0.0,INCORRECT,3,0.0,1.0,0.0,ORG,21,2000
+sfq_25100,correct,-0.0,0.0,1,0.0,CORRECT,3,1.0,0.0,0.0,ORG,21,2000
+sfq_25100,obvious_wrong,-0.0,0.0,1,0.0,INCORRECT,3,0.0,1.0,0.0,ORG,21,2000

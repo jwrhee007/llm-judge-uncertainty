@@ -1,0 +1,13 @@
+[project]
+name = "llm-judge-uncertainty"
+version = "0.1.0"
+description = "LLM-Judge Semantic Uncertainty 관측 연구 - Phase A Baseline"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

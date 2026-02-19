@@ -1,0 +1,61 @@
+{
+    // =============================================================
+    // Python Environment
+    // =============================================================
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.terminal.activateEnvironment": true,
+
+    // =============================================================
+    // Linting & Formatting
+    // =============================================================
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.fixAll": "explicit",
+            "source.organizeImports": "explicit"
+        }
+    },
+    "ruff.lineLength": 100,
+
+    // =============================================================
+    // Testing (pytest)
+    // =============================================================
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": ["tests"],
+    "python.testing.unittestEnabled": false,
+
+    // =============================================================
+    // Terminal
+    // =============================================================
+    "terminal.integrated.env.linux": {
+        "PYTHONPATH": "${workspaceFolder}"
+    },
+    "terminal.integrated.env.osx": {
+        "PYTHONPATH": "${workspaceFolder}"
+    },
+    "terminal.integrated.env.windows": {
+        "PYTHONPATH": "${workspaceFolder}"
+    },
+
+    // =============================================================
+    // Files
+    // =============================================================
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/*.pyc": true,
+        ".pytest_cache": true,
+        "*.egg-info": true
+    },
+    "files.associations": {
+        "*.jsonl": "json"
+    },
+
+    // =============================================================
+    // Editor
+    // =============================================================
+    "editor.rulers": [100],
+    "editor.tabSize": 4,
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true
+}

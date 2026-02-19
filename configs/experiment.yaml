@@ -1,0 +1,88 @@
+# =============================================================
+# LLM-Judge Semantic Uncertainty - Experiment Configuration
+# Phase A: Baseline (pseudo-deterministic)
+# =============================================================
+
+# --- Dataset ---
+dataset:
+  name: "triviaqa"
+  split: "validation"          # HuggingFace: trivia_qa, rc.nocontext or rc
+  subset: "rc"                 # rc = with evidence (지문 포함)
+  n_questions: 200             # 서브셋 크기
+  seed: 42                     # 서브셋 샘플링 시드
+  min_context_length: 50       # 너무 짧은 지문 제외 (토큰 수)
+  max_context_length: 2000     # 너무 긴 지문 제외 (토큰 수)
+
+# --- Answer Generation (Rule-Based) ---
+wrong_answers:
+  answer_types:                # NER 기반 Answer Type 분류
+    - PERSON
+    - DATE
+    - LOCATION
+    - NUMBER
+    - ORG
+  obvious:
+    method: "cross_type_swap"  # 다른 Answer Type의 엔티티로 교체
+  confusing:
+    method: "same_type_swap"   # 같은 Answer Type 내 다른 문항의 정답
+    numeric_perturbation:      # DATE/NUMBER 타입 전용
+      year_offsets: [1, 5, 10] # year ± offset 중 랜덤
+      number_factors: [0.8, 1.2]
+
+# --- Judge Model ---
+judge:
+  model: "gpt-4o-mini"
+  temperature: 0.0
+  seed: 42                     # API seed 파라미터
+  max_tokens: 300
+  n_trials: 30                 # 문항당 반복 횟수
+  logprobs: true               # 토큰 확률 수집
+  top_logprobs: 5
+
+# --- Judge Prompt ---
+judge_prompt:
+  system: |
+    You are a precise QA evaluation judge. Your task is to determine whether the given answer is correct based on the provided context passage.
+    
+    You must respond ONLY in the following JSON format:
+    {
+      "verdict": "CORRECT" | "INCORRECT" | "UNSURE",
+      "evidence_span": "<exact quote from context that supports your judgment>",
+      "brief_rationale": "<1-2 sentence explanation>"
+    }
+    
+    Rules:
+    - CORRECT: The answer is factually supported by the context.
+    - INCORRECT: The answer contradicts or is not supported by the context.
+    - UNSURE: The context is insufficient to determine correctness.
+    - Always cite the specific evidence from the context.
+  
+  user_template: |
+    Context: {context}
+    
+    Question: {question}
+    
+    Answer: {answer}
+    
+    Judge whether the answer is CORRECT, INCORRECT, or UNSURE based on the context.
+
+# --- API Settings ---
+api:
+  requests_per_minute: 500     # GPT-4o-mini tier 기준
+  max_retries: 5
+  retry_base_delay: 1.0        # 초 단위, exponential backoff
+  timeout: 30                  # 초
+  checkpoint_interval: 100     # N회 호출마다 체크포인트 저장
+
+# --- Smoke Test ---
+smoke_test:
+  n_questions: 5
+  n_trials: 3
+
+# --- Analysis ---
+analysis:
+  entropy_base: "natural"      # log base: "natural" (ln) or "2" (bits)
+  flip_rate_threshold: 0.0     # flip_rate > threshold인 문항만 불안정으로 분류
+  output_formats:
+    - "csv"
+    - "png"
