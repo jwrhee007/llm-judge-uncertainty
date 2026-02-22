@@ -1,0 +1,46 @@
+{
+  "total_eval_sets": 600,
+  "issue_type_distribution": {
+    "stable_correct": 517,
+    "mismatch_only": 48,
+    "both": 24,
+    "unstable_only": 11
+  },
+  "unstable_count": 35,
+  "mismatch_count": 72,
+  "mismatch_subtypes": {
+    "correct→INCORRECT": {
+      "total": 50,
+      "SE=0": 39,
+      "SE>0": 11
+    },
+    "correct→UNSURE": {
+      "total": 19,
+      "SE=0": 7,
+      "SE>0": 12
+    }
+  },
+  "per_category": {
+    "correct": {
+      "total": 200,
+      "stable_correct": 123,
+      "unstable_only": 8,
+      "mismatch_only": 46,
+      "both": 23
+    },
+    "obvious_wrong": {
+      "total": 200,
+      "stable_correct": 198,
+      "unstable_only": 1,
+      "mismatch_only": 1,
+      "both": 0
+    },
+    "confusing_wrong": {
+      "total": 200,
+      "stable_correct": 196,
+      "unstable_only": 2,
+      "mismatch_only": 1,
+      "both": 1
+    }
+  }
+}
