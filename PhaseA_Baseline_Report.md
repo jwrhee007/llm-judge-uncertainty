@@ -229,7 +229,7 @@ Majority Verdict 기준:
 - Entropy vs Answer Category: H=51.10, **p=8.03×10⁻¹²**
 - Flip Rate vs Answer Category: H=51.07, **p=8.14×10⁻¹²**
 
-**해석**: 판단 불안정성은 answer category 간에 극도로 유의미한 차이를 보인다 (p < 10⁻¹¹). 정답(correct) 카테고리가 오답 대비 entropy 15~20배, flip rate 14~17배 높다. **Judge는 오답을 "틀렸다"고 판단하는 데는 매우 안정적이나, 정답을 "맞다"고 확인하는 데서 판단이 흔들린다.**
+**해석**: 판단 불안정성은 answer category 간에 극도로 유의미한 차이를 보인다 (p < 10⁻¹¹). 정답(correct) 카테고리가 오답 대비 entropy 15\~20배, flip rate 14\~17배 높다. **Judge는 오답을 "틀렸다"고 판단하는 데는 매우 안정적이나, 정답을 "맞다"고 확인하는 데서 판단이 흔들린다.**
 
 ### 4.4 RQ3: Entropy와 Correctness의 관계
 
@@ -300,15 +300,15 @@ Majority Verdict 기준:
 
 1. **T=0에서도 판단 불안정성 존재 (H₁ 지지)**: 600개 evaluation set 중 35개(5.8%)에서 flip이 관찰되었으며, 이 중 31개(88.6%)가 정답 평가에 집중되었다.
 
-2. **비대칭적 불안정성**: Judge는 오답을 "틀렸다"고 판단하는 데는 안정적(flip rate 0.2~0.3%)이나, 정답을 "맞다"고 확인하는 데는 14~17배 더 불안정하다(flip rate 3.4%). 이는 LLM-as-a-Judge의 **false negative 편향**을 시사한다.
+2. **비대칭적 불안정성**: Judge는 오답을 "틀렸다"고 판단하는 데는 안정적(flip rate 0.2\~0.3%)이나, 정답을 "맞다"고 확인하는 데는 14\~17배 더 불안정하다(flip rate 3.4%). 이는 LLM-as-a-Judge의 **false negative 편향**을 시사한다.
 
 3. **UNSURE는 불안정성의 강력한 신호**: UNSURE가 majority verdict인 세트는 entropy 중앙값 0.25로, CORRECT/INCORRECT 대비 현저히 높다. Judge가 "확신 없음"을 표현할 때, 이는 단순히 정보 부족이 아니라 판단 경계에서의 실질적 동요를 반영한다.
 
 4. **Answer Type이 안정성에 영향**: 숫자(NUMBER)는 완벽히 안정적이고, 추상 개념(OTHER)과 인물(PERSON)은 불안정하다. 맥락 의존적 판단이 필요한 타입일수록 불안정성이 높아진다.
 
-### 6.2 Offline RL 시사점
+### 시사점
 
-이 결과는 LLM-Judge를 reward model로 사용하는 Offline RL 시스템에 중요한 함의를 갖는다:
+이 결과는 LLM-Judge를 reward model로 사용하는 시스템에 중요한 함의를 갖는다:
 
 - **정답에 대한 false negative**는 reward 과소 추정을 야기하여, 올바른 행동이 충분히 강화되지 않을 수 있다
 - **5.8%의 불안정성**은 대규모 학습 데이터에서 수천 건의 inconsistent reward signal로 이어질 수 있다
