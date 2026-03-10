@@ -1,731 +1,337 @@
 """
-Step 3: Semantic Uncertainty 분석 + 심층 분석
-- Verdict 분포 집계
-- Semantic Entropy 계산 (Simple Clustering, verdict 기반)
-- Normalized Semantic Entropy / Flip Rate
-- 통계 검정 (Kruskal-Wallis, Mann-Whitney U)
-- 시각화 (entropy vs category, correctness, NER type)
-- 심층 분류 (stable / unstable / mismatch / both)
-- Unstable(SE>0) + Mismatch(expected≠majority) 상세 추출
-- 대표 사례 콘솔 출력
+Phase B Step 3: 3-Prompt Comparison Analysis
+- 프롬프트별 Verdict 분포 + Semantic Entropy (H, H_norm)
+- Cross-prompt H_norm 비교
+- Negativity Bias 분석
+- spaCy native NER 태그별 Content Effect
+- 심층 분류 + 상세 추출
 
 Usage:
-    python -m src.analyze
-    python -m src.analyze --smoke
-    python -m src.analyze --skip-deep    # 심층 분석 건너뛰기
+    python -m src.analyze --config experiment_b1.yaml
+    python -m src.analyze --config experiment_b1.yaml --smoke
 """
-import argparse
-import json
-import sys
+from __future__ import annotations
+import argparse, json, sys
 from collections import Counter
 from pathlib import Path
-
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from scipy import stats
 
-# 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from src.utils import (
-    DATA_PROCESSED,
-    RESULTS_ANALYSIS,
-    RESULTS_LOGS,
-    load_config,
-    read_jsonl,
-    setup_logger,
-)
+from src.utils import DATA_PROCESSED, RESULTS_ANALYSIS, RESULTS_LOGS, load_config, read_jsonl, setup_logger
+from src.prompts import POSITIVE, NEGATIVE, UNCERTAIN, PARSE_ERROR as LABEL_PARSE_ERROR
 
 logger = setup_logger("analyze")
-
-# 스타일 설정
 sns.set_theme(style="whitegrid", palette="muted", font_scale=1.1)
 
-
-# =============================================================
-# 1. 데이터 로드 및 집계
-# =============================================================
+# === 1. 데이터 로드 ===
 def load_results(smoke: bool = False) -> pd.DataFrame:
-    """Judge 결과 JSONL을 DataFrame으로 로드."""
-    suffix = "_smoke" if smoke else ""
-    log_path = RESULTS_LOGS / f"judge_results{suffix}.jsonl"
-
-    if not log_path.exists():
-        logger.error(f"File not found: {log_path}")
-        logger.error("Run 'python -m src.run_judge' first.")
-        sys.exit(1)
-
-    records = read_jsonl(log_path)
-    df = pd.DataFrame(records)
-    logger.info(f"Loaded {len(df)} records from {log_path}")
-
-    # 기본 필터: API_ERROR, PARSE_ERROR 제외
-    n_errors = df[df["verdict"].isin(["API_ERROR", "PARSE_ERROR"])].shape[0]
-    if n_errors > 0:
-        logger.warning(f"  Excluding {n_errors} error records")
-        df = df[~df["verdict"].isin(["API_ERROR", "PARSE_ERROR"])].copy()
-
+    sfx = "_smoke" if smoke else ""
+    path = RESULTS_LOGS / f"judge_results_b1{sfx}.jsonl"
+    if not path.exists():
+        logger.error(f"Not found: {path}"); sys.exit(1)
+    df = pd.DataFrame(read_jsonl(path))
+    logger.info(f"Loaded {len(df)} records")
+    n_err = df[df["verdict"].isin(["API_ERROR", LABEL_PARSE_ERROR])].shape[0]
+    if n_err:
+        logger.warning(f"  Excluding {n_err} errors")
+        df = df[~df["verdict"].isin(["API_ERROR", LABEL_PARSE_ERROR])].copy()
     return df
 
-
-def load_evaluation_metadata(smoke: bool = False) -> pd.DataFrame:
-    """evaluation_set.jsonl에서 메타데이터(answer_type_ner, lengths 등) 로드."""
-    suffix = "_smoke" if smoke else ""
-    filepath = DATA_PROCESSED / f"evaluation_set{suffix}.jsonl"
-    records = read_jsonl(filepath)
-    meta = pd.DataFrame(records)
-    # question_id + answer_category 기준으로 중복 제거
+def load_eval_meta(smoke: bool = False) -> pd.DataFrame:
+    sfx = "_smoke" if smoke else ""
+    path = DATA_PROCESSED / f"evaluation_set_b1{sfx}.jsonl"
+    meta = pd.DataFrame(read_jsonl(path))
     meta = meta.drop_duplicates(subset=["question_id", "answer_category"])
-    return meta[["question_id", "answer_category", "answer_type_ner",
-                  "question_length", "context_length", "ground_truth", "answer"]]
+    return meta
 
-
-def load_evaluation_full(smoke: bool = False) -> pd.DataFrame:
-    """evaluation_set.jsonl 전체 로드 (심층 분석용: question, context 포함)."""
-    suffix = "_smoke" if smoke else ""
-    filepath = DATA_PROCESSED / f"evaluation_set{suffix}.jsonl"
-    records = read_jsonl(filepath)
-    return pd.DataFrame(records)
-
-
-# =============================================================
-# 2. Verdict 분포 집계
-# =============================================================
-def compute_verdict_distribution(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    각 (question_id × answer_category) 세트의 verdict 분포 계산.
-    Returns: DataFrame with p_correct, p_incorrect, p_unsure per set.
-    """
-    grouped = df.groupby(["question_id", "answer_category"])
-
+# === 2. Verdict 분포 (프롬프트별) ===
+def compute_verdict_distribution(df: pd.DataFrame, config: dict) -> pd.DataFrame:
+    """(prompt_id, question_id, answer_category)별 verdict 분포."""
+    verdict_k_map = config["prompts"]["verdict_k"]
     rows = []
-    for (qid, acat), group in grouped:
-        n = len(group)
-        counts = Counter(group["verdict"])
-
+    for (pid, qid, acat), grp in df.groupby(["prompt_id", "question_id", "answer_category"]):
+        n = len(grp)
+        counts = Counter(grp["verdict"])
+        k = verdict_k_map.get(pid, 3)
         rows.append({
-            "question_id": qid,
-            "answer_category": acat,
-            "n_trials": n,
-            "n_correct": counts.get("CORRECT", 0),
-            "n_incorrect": counts.get("INCORRECT", 0),
-            "n_unsure": counts.get("UNSURE", 0),
-            "p_correct": counts.get("CORRECT", 0) / n,
-            "p_incorrect": counts.get("INCORRECT", 0) / n,
-            "p_unsure": counts.get("UNSURE", 0) / n,
+            "prompt_id": pid, "question_id": qid, "answer_category": acat,
+            "n_trials": n, "verdict_k": k,
+            "n_positive": counts.get(POSITIVE, 0),
+            "n_negative": counts.get(NEGATIVE, 0),
+            "n_uncertain": counts.get(UNCERTAIN, 0),
+            "p_positive": counts.get(POSITIVE, 0) / n,
+            "p_negative": counts.get(NEGATIVE, 0) / n,
+            "p_uncertain": counts.get(UNCERTAIN, 0) / n,
             "majority_verdict": counts.most_common(1)[0][0],
         })
+    return pd.DataFrame(rows)
 
-    result = pd.DataFrame(rows)
-    logger.info(f"Computed verdict distribution for {len(result)} evaluation sets")
-    return result
-
-
-# =============================================================
-# 3. Semantic Entropy 계산
-# =============================================================
-def compute_semantic_entropy(verdict_df: pd.DataFrame, base: str = "natural") -> pd.DataFrame:
-    """
-    Simple Clustering (verdict 기반) Semantic Entropy 계산.
-    H_semantic = -Σ p_i × log(p_i)   (p_i > 0인 클러스터만)
-
-    Also computes:
-    - H_norm = H / log(K)  (K = 활성 클러스터 수)
-    - flip_rate = (다수결과 다른 판정 수) / N
-    """
-    log_fn = np.log if base == "natural" else np.log2
-
+# === 3. Semantic Entropy (H + H_norm) ===
+def compute_semantic_entropy(vdf: pd.DataFrame) -> pd.DataFrame:
+    """H = -Σ p*ln(p), H_norm = H / ln(K)."""
     rows = []
-    for _, row in verdict_df.iterrows():
-        probs = [row["p_correct"], row["p_incorrect"], row["p_unsure"]]
-        active_probs = [p for p in probs if p > 0]
-        k = len(active_probs)
-
-        # Semantic Entropy
-        h = -sum(p * log_fn(p) for p in active_probs)
-
-        # Normalized Semantic Entropy
-        h_norm = h / log_fn(k) if k > 1 else 0.0
-
-        # Flip Rate
-        n = row["n_trials"]
-        majority_count = max(row["n_correct"], row["n_incorrect"], row["n_unsure"])
-        flip_rate = (n - majority_count) / n
-
+    for _, r in vdf.iterrows():
+        probs = [r["p_positive"], r["p_negative"]]
+        if r["verdict_k"] >= 3:
+            probs.append(r["p_uncertain"])
+        active = [p for p in probs if p > 0]
+        k_active = len(active)
+        h = -sum(p * np.log(p) for p in active) if active else 0.0
+        k = r["verdict_k"]
+        h_norm = h / np.log(k) if k > 1 and h > 0 else 0.0
+        majority_count = max(r["n_positive"], r["n_negative"],
+                             r["n_uncertain"] if r["verdict_k"] >= 3 else 0)
+        flip_rate = (r["n_trials"] - majority_count) / r["n_trials"]
         rows.append({
-            "question_id": row["question_id"],
-            "answer_category": row["answer_category"],
-            "semantic_entropy": h,
-            "normalized_entropy": h_norm,
-            "active_clusters": k,
-            "flip_rate": flip_rate,
-            "majority_verdict": row["majority_verdict"],
-            "n_trials": n,
-            "p_correct": row["p_correct"],
-            "p_incorrect": row["p_incorrect"],
-            "p_unsure": row["p_unsure"],
+            **{c: r[c] for c in ["prompt_id","question_id","answer_category","n_trials",
+                                  "verdict_k","p_positive","p_negative","p_uncertain",
+                                  "majority_verdict"]},
+            "semantic_entropy": h, "h_norm": h_norm,
+            "active_clusters": k_active, "flip_rate": flip_rate,
         })
-
     result = pd.DataFrame(rows)
-    logger.info(f"Semantic Entropy computed: mean={result['semantic_entropy'].mean():.4f}, "
-                f"flip_rate mean={result['flip_rate'].mean():.4f}")
+    logger.info(f"SE computed: {len(result)} sets, mean H={result['semantic_entropy'].mean():.4f}, "
+                f"mean H_norm={result['h_norm'].mean():.4f}")
     return result
 
-
-# =============================================================
-# 4. 통계 분석
-# =============================================================
-def run_statistical_analysis(entropy_df: pd.DataFrame) -> dict:
-    """핵심 관측 항목에 대한 통계 분석."""
+# === 4. 통계 분석 ===
+def run_statistical_analysis(edf: pd.DataFrame, config: dict) -> dict:
     results = {}
+    prompt_ids = sorted(edf["prompt_id"].unique())
 
-    # --- RQ1: entropy vs answer_category ---
-    categories = entropy_df["answer_category"].unique()
-    groups = {cat: entropy_df[entropy_df["answer_category"] == cat]["semantic_entropy"]
-              for cat in categories}
-
-    if len(groups) >= 2:
-        group_values = [g.values for g in groups.values()]
-        if all(len(g) > 1 for g in group_values):
-            stat, p_val = stats.kruskal(*group_values)
-            results["entropy_vs_answer_category"] = {
-                "test": "Kruskal-Wallis",
-                "statistic": float(stat),
-                "p_value": float(p_val),
-                "group_means": {cat: float(g.mean()) for cat, g in groups.items()},
-                "group_medians": {cat: float(g.median()) for cat, g in groups.items()},
+    # --- Cross-prompt H_norm comparison ---
+    if len(prompt_ids) >= 2:
+        groups = [edf[edf["prompt_id"] == pid]["h_norm"].values for pid in prompt_ids]
+        if all(len(g) > 1 for g in groups):
+            stat, p = stats.kruskal(*groups)
+            results["h_norm_vs_prompt"] = {
+                "test": "Kruskal-Wallis", "statistic": float(stat), "p_value": float(p),
+                "group_means": {pid: float(edf[edf["prompt_id"]==pid]["h_norm"].mean()) for pid in prompt_ids},
             }
-            logger.info(f"  RQ1 (entropy vs answer_category): H={stat:.2f}, p={p_val:.4f}")
+            logger.info(f"  H_norm vs prompt: H={stat:.2f}, p={p:.6f}")
 
-    # --- RQ1: flip_rate vs answer_category ---
-    flip_groups = {cat: entropy_df[entropy_df["answer_category"] == cat]["flip_rate"]
-                   for cat in categories}
-    if len(flip_groups) >= 2:
-        flip_values = [g.values for g in flip_groups.values()]
-        if all(len(g) > 1 for g in flip_values):
-            stat, p_val = stats.kruskal(*flip_values)
-            results["flip_rate_vs_answer_category"] = {
-                "test": "Kruskal-Wallis",
-                "statistic": float(stat),
-                "p_value": float(p_val),
-                "group_means": {cat: float(g.mean()) for cat, g in flip_groups.items()},
+    # --- Per-prompt: entropy vs answer_category ---
+    for pid in prompt_ids:
+        sub = edf[edf["prompt_id"] == pid]
+        cats = sub["answer_category"].unique()
+        groups = [sub[sub["answer_category"]==c]["semantic_entropy"].values for c in cats]
+        if len(groups) >= 2 and all(len(g) > 1 for g in groups):
+            stat, p = stats.kruskal(*groups)
+            results[f"entropy_vs_category_{pid}"] = {
+                "test": "Kruskal-Wallis", "statistic": float(stat), "p_value": float(p),
+                "group_means": {c: float(sub[sub["answer_category"]==c]["semantic_entropy"].mean()) for c in cats},
             }
-            logger.info(f"  RQ1 (flip_rate vs answer_category): H={stat:.2f}, p={p_val:.4f}")
 
-    # --- RQ3: entropy vs correctness (majority_verdict 기준) ---
-    correct_entropy = entropy_df[entropy_df["majority_verdict"] == "CORRECT"]["semantic_entropy"]
-    incorrect_entropy = entropy_df[entropy_df["majority_verdict"] == "INCORRECT"]["semantic_entropy"]
-
-    if len(correct_entropy) > 1 and len(incorrect_entropy) > 1:
-        stat, p_val = stats.mannwhitneyu(correct_entropy, incorrect_entropy, alternative="two-sided")
-        results["entropy_vs_correctness"] = {
-            "test": "Mann-Whitney U",
-            "statistic": float(stat),
-            "p_value": float(p_val),
-            "correct_mean": float(correct_entropy.mean()),
-            "incorrect_mean": float(incorrect_entropy.mean()),
-        }
-        logger.info(f"  RQ3 (entropy: correct vs incorrect): U={stat:.2f}, p={p_val:.4f}")
+    # --- Per-prompt: NER tag effect (다빈도 태그만) ---
+    min_for_stats = config["sampling"]["min_for_stats"]
+    for pid in prompt_ids:
+        sub = edf[edf["prompt_id"] == pid]
+        if "spacy_label" not in sub.columns:
+            continue
+        tag_counts = sub["spacy_label"].value_counts()
+        valid_tags = tag_counts[tag_counts >= min_for_stats].index.tolist()
+        if len(valid_tags) < 2:
+            continue
+        groups = [sub[sub["spacy_label"]==t]["semantic_entropy"].values for t in valid_tags]
+        if all(len(g) > 1 for g in groups):
+            stat, p = stats.kruskal(*groups)
+            results[f"entropy_vs_ner_{pid}"] = {
+                "test": "Kruskal-Wallis", "statistic": float(stat), "p_value": float(p),
+                "tags_tested": valid_tags,
+                "group_means": {t: float(sub[sub["spacy_label"]==t]["semantic_entropy"].mean()) for t in valid_tags},
+            }
 
     return results
 
-
-# =============================================================
-# 5. 시각화
-# =============================================================
-def create_visualizations(
-    entropy_df: pd.DataFrame, suffix: str = "", save_dir: Path = RESULTS_ANALYSIS
-):
-    """핵심 시각화 생성."""
-
-    # --- Figure 1: Entropy by Answer Category ---
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-
-    order = ["correct", "obvious_wrong", "confusing_wrong"]
-    available_order = [o for o in order if o in entropy_df["answer_category"].values]
-    sns.boxplot(data=entropy_df, x="answer_category", y="semantic_entropy",
-                order=available_order, ax=axes[0])
-    axes[0].set_title("Semantic Entropy by Answer Category")
-    axes[0].set_xlabel("Answer Category")
-    axes[0].set_ylabel("Semantic Entropy (nats)")
-
-    sns.boxplot(data=entropy_df, x="answer_category", y="flip_rate",
-                order=available_order, ax=axes[1])
-    axes[1].set_title("Flip Rate by Answer Category")
-    axes[1].set_xlabel("Answer Category")
-    axes[1].set_ylabel("Flip Rate")
-
-    sns.histplot(data=entropy_df, x="normalized_entropy", hue="answer_category",
-                 hue_order=available_order, bins=20, ax=axes[2], stat="density", common_norm=False)
-    axes[2].set_title("Normalized Entropy Distribution")
-    axes[2].set_xlabel("Normalized Entropy")
-
-    plt.tight_layout()
-    fig.savefig(save_dir / f"fig1_entropy_by_category{suffix}.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    logger.info(f"  Saved fig1_entropy_by_category{suffix}.png")
-
-    # --- Figure 2: Entropy vs Correctness ---
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-    verdicts_present = [v for v in ["CORRECT", "INCORRECT", "UNSURE"]
-                        if v in entropy_df["majority_verdict"].values]
-    sns.boxplot(data=entropy_df, x="majority_verdict", y="semantic_entropy",
-                order=verdicts_present, ax=axes[0])
-    axes[0].set_title("Entropy by Majority Verdict (RQ3)")
-    axes[0].set_xlabel("Majority Verdict")
-    axes[0].set_ylabel("Semantic Entropy (nats)")
-
-    sns.scatterplot(data=entropy_df, x="semantic_entropy", y="flip_rate",
-                    hue="answer_category", hue_order=available_order, alpha=0.6, ax=axes[1])
-    axes[1].set_title("Flip Rate vs Semantic Entropy")
-    axes[1].set_xlabel("Semantic Entropy (nats)")
-    axes[1].set_ylabel("Flip Rate")
-
-    plt.tight_layout()
-    fig.savefig(save_dir / f"fig2_entropy_vs_correctness{suffix}.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    logger.info(f"  Saved fig2_entropy_vs_correctness{suffix}.png")
-
-    # --- Figure 3: NER type별 ---
-    if "answer_type_ner" in entropy_df.columns:
-        fig, ax = plt.subplots(figsize=(10, 5))
-        type_order = (entropy_df.groupby("answer_type_ner")["semantic_entropy"]
-                      .mean().sort_values(ascending=False).index.tolist())
-        sns.boxplot(data=entropy_df, x="answer_type_ner", y="semantic_entropy",
-                    order=type_order, ax=ax)
-        ax.set_title("Semantic Entropy by Answer NER Type")
-        ax.set_xlabel("Answer Type (NER)")
-        ax.set_ylabel("Semantic Entropy (nats)")
-        plt.tight_layout()
-        fig.savefig(save_dir / f"fig3_entropy_by_ner_type{suffix}.png", dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        logger.info(f"  Saved fig3_entropy_by_ner_type{suffix}.png")
-
-
-# =============================================================
-# 6. 결과 저장 및 요약
-# =============================================================
-def save_results(
-    entropy_df: pd.DataFrame,
-    stat_results: dict,
-    suffix: str = "",
-):
-    """분석 결과를 CSV + JSON으로 저장."""
-    csv_path = RESULTS_ANALYSIS / f"entropy_results{suffix}.csv"
-    entropy_df.to_csv(csv_path, index=False)
-    logger.info(f"  Saved {csv_path}")
-
-    stats_path = RESULTS_ANALYSIS / f"statistical_tests{suffix}.json"
-    with open(stats_path, "w", encoding="utf-8") as f:
-        json.dump(stat_results, f, indent=2, ensure_ascii=False)
-    logger.info(f"  Saved {stats_path}")
-
-
-def print_summary(entropy_df: pd.DataFrame, stat_results: dict):
-    """콘솔에 요약 출력."""
-    logger.info("=" * 60)
-    logger.info("Analysis Summary")
-    logger.info("=" * 60)
-
-    logger.info(f"  Total evaluation sets: {len(entropy_df)}")
-    logger.info(f"  Mean Semantic Entropy: {entropy_df['semantic_entropy'].mean():.4f}")
-    logger.info(f"  Mean Flip Rate: {entropy_df['flip_rate'].mean():.4f}")
-
-    unstable = entropy_df[entropy_df["flip_rate"] > 0]
-    logger.info(f"  Unstable sets (flip_rate > 0): {len(unstable)} / {len(entropy_df)} "
-                f"({len(unstable) / len(entropy_df) * 100:.1f}%)")
-
-    logger.info("-" * 60)
-    logger.info("  Per-category summary:")
-    for cat in ["correct", "obvious_wrong", "confusing_wrong"]:
-        subset = entropy_df[entropy_df["answer_category"] == cat]
-        if len(subset) == 0:
+# === 5. Negativity Bias 분석 ===
+def analyze_negativity_bias(edf: pd.DataFrame) -> dict:
+    """correct 답변에 대한 오판 방향 분석 (프롬프트별)."""
+    results = {}
+    for pid in sorted(edf["prompt_id"].unique()):
+        sub = edf[(edf["prompt_id"] == pid) & (edf["answer_category"] == "correct")]
+        total = len(sub)
+        if total == 0:
             continue
-        logger.info(f"    {cat:20s}: entropy={subset['semantic_entropy'].mean():.4f}, "
-                    f"flip_rate={subset['flip_rate'].mean():.4f}, "
-                    f"unstable={sum(subset['flip_rate'] > 0)}/{len(subset)}")
+        n_pos = (sub["majority_verdict"] == POSITIVE).sum()
+        n_neg = (sub["majority_verdict"] == NEGATIVE).sum()
+        n_unc = (sub["majority_verdict"] == UNCERTAIN).sum()
+        k = sub["verdict_k"].iloc[0]
+        results[pid] = {
+            "total_correct": int(total), "verdict_k": int(k),
+            "majority_POSITIVE": int(n_pos), "majority_NEGATIVE": int(n_neg),
+            "majority_UNCERTAIN": int(n_unc),
+            "misclassification_rate": float((n_neg + n_unc) / total),
+            "negative_bias_ratio": float(n_neg / (n_neg + n_unc)) if (n_neg + n_unc) > 0 else None,
+        }
+        logger.info(f"  [{pid}] correct→POS:{n_pos} NEG:{n_neg} UNC:{n_unc} "
+                     f"(neg_bias={results[pid]['negative_bias_ratio']})")
+    return results
 
-    if stat_results:
-        logger.info("-" * 60)
-        logger.info("  Statistical tests:")
-        for name, res in stat_results.items():
-            logger.info(f"    {name}: {res['test']}, p={res['p_value']:.4f}")
+# === 6. 시각화 ===
+def create_visualizations(edf: pd.DataFrame, sfx: str = ""):
+    prompt_ids = sorted(edf["prompt_id"].unique())
+    n_prompts = len(prompt_ids)
 
+    # Fig 1: H_norm by prompt (cross-prompt comparison)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    sns.boxplot(data=edf, x="prompt_id", y="h_norm", order=prompt_ids, ax=ax)
+    ax.set_title("Normalized Semantic Entropy by Prompt (H_norm)")
+    ax.set_ylabel("H_norm (0~1)")
+    plt.tight_layout()
+    fig.savefig(RESULTS_ANALYSIS / f"fig1_hnorm_by_prompt{sfx}.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
-# =============================================================
-# 7. 심층 분류 (Deep Analysis)
-# =============================================================
-def classify_questions(entropy_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    각 eval set를 4분류:
-    - stable_correct: 안정 + 정확 판정
-    - unstable_only:  SE>0 흔들렸지만 다수결은 기대와 일치
-    - mismatch_only:  SE=0 안정적이지만 기대와 불일치 (체계적 오판)
-    - both:           SE>0 흔들리면서 기대와 불일치
-    """
-    df = entropy_df.copy()
+    # Fig 2: SE by answer_category (per prompt)
+    fig, axes = plt.subplots(1, n_prompts, figsize=(6*n_prompts, 5), sharey=True)
+    if n_prompts == 1: axes = [axes]
+    cat_order = ["correct", "obvious_wrong", "confusing_wrong"]
+    for ax, pid in zip(axes, prompt_ids):
+        sub = edf[edf["prompt_id"] == pid]
+        avail = [c for c in cat_order if c in sub["answer_category"].values]
+        sns.boxplot(data=sub, x="answer_category", y="semantic_entropy", order=avail, ax=ax)
+        ax.set_title(f"{pid}")
+        ax.set_xlabel(""); ax.set_ylabel("SE (nats)" if ax == axes[0] else "")
+    fig.suptitle("Semantic Entropy by Answer Category (per Prompt)", y=1.02)
+    plt.tight_layout()
+    fig.savefig(RESULTS_ANALYSIS / f"fig2_entropy_by_category{sfx}.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
-    df["expected_verdict"] = df["answer_category"].apply(
-        lambda cat: "CORRECT" if cat == "correct" else "INCORRECT"
-    )
+    # Fig 3: SE by NER tag (가장 안정적인 프롬프트 기준)
+    if "spacy_label" in edf.columns:
+        # 전체 프롬프트 평균 h_norm이 가장 낮은 프롬프트 선택
+        best_pid = edf.groupby("prompt_id")["h_norm"].mean().idxmin()
+        sub = edf[edf["prompt_id"] == best_pid]
+        tag_order = sub.groupby("spacy_label")["semantic_entropy"].mean().sort_values(ascending=False).index.tolist()
+        fig, ax = plt.subplots(figsize=(max(10, len(tag_order)*0.8), 5))
+        sns.boxplot(data=sub, x="spacy_label", y="semantic_entropy", order=tag_order, ax=ax)
+        ax.set_title(f"SE by NER Tag [{best_pid}]")
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
+        plt.tight_layout()
+        fig.savefig(RESULTS_ANALYSIS / f"fig3_entropy_by_ner{sfx}.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    # Fig 4: Negativity Bias — correct 카테고리 verdict 분포
+    correct_sub = edf[edf["answer_category"] == "correct"]
+    fig, axes = plt.subplots(1, n_prompts, figsize=(5*n_prompts, 4))
+    if n_prompts == 1: axes = [axes]
+    for ax, pid in zip(axes, prompt_ids):
+        sub = correct_sub[correct_sub["prompt_id"] == pid]
+        vc = sub["majority_verdict"].value_counts()
+        vc.plot.bar(ax=ax, color=["#2ecc71","#e74c3c","#f39c12"][:len(vc)])
+        ax.set_title(f"{pid}\n(correct answers)")
+        ax.set_ylabel("Count"); ax.set_xlabel("")
+    fig.suptitle("Majority Verdict Distribution for Correct Answers", y=1.02)
+    plt.tight_layout()
+    fig.savefig(RESULTS_ANALYSIS / f"fig4_negativity_bias{sfx}.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    logger.info(f"  Saved 4 figures to results/analysis/")
+
+# === 7. 결과 저장 ===
+def save_results(edf, stat_results, neg_results, sfx=""):
+    edf.to_csv(RESULTS_ANALYSIS / f"entropy_results_b1{sfx}.csv", index=False)
+    with open(RESULTS_ANALYSIS / f"statistical_tests_b1{sfx}.json", "w") as f:
+        json.dump(stat_results, f, indent=2, ensure_ascii=False)
+    with open(RESULTS_ANALYSIS / f"negativity_bias_b1{sfx}.json", "w") as f:
+        json.dump(neg_results, f, indent=2, ensure_ascii=False)
+    logger.info(f"  Results saved")
+
+# === 8. 심층 분류 ===
+def classify_questions(edf: pd.DataFrame) -> pd.DataFrame:
+    df = edf.copy()
+    df["expected_verdict"] = df["answer_category"].apply(lambda c: POSITIVE if c == "correct" else NEGATIVE)
     df["is_unstable"] = df["semantic_entropy"] > 0
     df["is_mismatch"] = df["majority_verdict"] != df["expected_verdict"]
-
-    conditions = []
-    for _, row in df.iterrows():
-        if row["is_unstable"] and row["is_mismatch"]:
-            conditions.append("both")
-        elif row["is_unstable"]:
-            conditions.append("unstable_only")
-        elif row["is_mismatch"]:
-            conditions.append("mismatch_only")
-        else:
-            conditions.append("stable_correct")
-    df["issue_type"] = conditions
-
+    df["issue_type"] = df.apply(
+        lambda r: "both" if r["is_unstable"] and r["is_mismatch"]
+        else "unstable_only" if r["is_unstable"]
+        else "mismatch_only" if r["is_mismatch"]
+        else "stable_correct", axis=1)
     return df
 
-
-def summarize_classification(classified_df: pd.DataFrame):
-    """분류 결과 요약 출력."""
-    logger.info("=" * 60)
-    logger.info("Deep Analysis: 문항 분류 요약")
-    logger.info("=" * 60)
-
-    for t in ["stable_correct", "unstable_only", "mismatch_only", "both"]:
-        n = sum(classified_df["issue_type"] == t)
-        logger.info(f"  {t:20s}: {n:4d} ({n/len(classified_df)*100:.1f}%)")
-
-    logger.info("")
-    for cat in ["correct", "obvious_wrong", "confusing_wrong"]:
-        subset = classified_df[classified_df["answer_category"] == cat]
-        logger.info(f"  [{cat}] (n={len(subset)})")
-        for t in ["stable_correct", "unstable_only", "mismatch_only", "both"]:
-            n = sum(subset["issue_type"] == t)
-            if n > 0:
-                logger.info(f"    {t:20s}: {n:4d} ({n/len(subset)*100:.1f}%)")
-
-
-# =============================================================
-# 8. Unstable / Mismatch 상세 추출
-# =============================================================
-def extract_unstable_details(
-    classified_df: pd.DataFrame,
-    eval_df: pd.DataFrame,
-    judge_df: pd.DataFrame,
-) -> pd.DataFrame:
-    """SE > 0 문항의 상세 정보 추출 (question, answer, rationale 포함)."""
-    unstable = classified_df[classified_df["is_unstable"]].copy()
-    unstable = unstable.sort_values("semantic_entropy", ascending=False)
-
-    rows = []
-    for _, row in unstable.iterrows():
-        qid = row["question_id"]
-        acat = row["answer_category"]
-
-        eval_row = eval_df[
-            (eval_df["question_id"] == qid) & (eval_df["answer_category"] == acat)
-        ]
-        if eval_row.empty:
-            continue
-        eval_row = eval_row.iloc[0]
-
-        trials = judge_df[
-            (judge_df["question_id"] == qid) & (judge_df["answer_category"] == acat)
-        ]
-        verdict_counts = Counter(trials["verdict"])
-
-        sample_rationales = {}
-        for verdict in ["CORRECT", "INCORRECT", "UNSURE"]:
-            v_trials = trials[trials["verdict"] == verdict]
-            if len(v_trials) > 0:
-                sample_rationales[verdict] = v_trials.iloc[0].get("rationale", "")
-
-        rows.append({
-            "question_id": qid,
-            "answer_category": acat,
-            "issue_type": row["issue_type"],
-            "semantic_entropy": row["semantic_entropy"],
-            "flip_rate": row["flip_rate"],
-            "majority_verdict": row["majority_verdict"],
-            "expected_verdict": row["expected_verdict"],
-            "answer_type_ner": row.get("answer_type_ner", ""),
-            "n_correct": verdict_counts.get("CORRECT", 0),
-            "n_incorrect": verdict_counts.get("INCORRECT", 0),
-            "n_unsure": verdict_counts.get("UNSURE", 0),
-            "question": eval_row.get("question", ""),
-            "answer": eval_row.get("answer", ""),
-            "ground_truth": eval_row.get("ground_truth", ""),
-            "context_preview": str(eval_row.get("context", ""))[:300],
-            "rationale_CORRECT": sample_rationales.get("CORRECT", ""),
-            "rationale_INCORRECT": sample_rationales.get("INCORRECT", ""),
-            "rationale_UNSURE": sample_rationales.get("UNSURE", ""),
-        })
-
-    result = pd.DataFrame(rows)
-    logger.info(f"  Unstable 문항 (SE > 0): {len(result)}건")
-    return result
-
-
-def extract_mismatch_details(
-    classified_df: pd.DataFrame,
-    eval_df: pd.DataFrame,
-    judge_df: pd.DataFrame,
-) -> pd.DataFrame:
-    """Category-Verdict 불일치 문항의 상세 정보 추출."""
-    mismatch = classified_df[classified_df["is_mismatch"]].copy()
-    mismatch = mismatch.sort_values("semantic_entropy", ascending=False)
-
-    rows = []
-    for _, row in mismatch.iterrows():
-        qid = row["question_id"]
-        acat = row["answer_category"]
-
-        eval_row = eval_df[
-            (eval_df["question_id"] == qid) & (eval_df["answer_category"] == acat)
-        ]
-        if eval_row.empty:
-            continue
-        eval_row = eval_row.iloc[0]
-
-        trials = judge_df[
-            (judge_df["question_id"] == qid) & (judge_df["answer_category"] == acat)
-        ]
-        verdict_counts = Counter(trials["verdict"])
-
-        majority_v = row["majority_verdict"]
-        majority_trials = trials[trials["verdict"] == majority_v]
-        sample_rationale = majority_trials.iloc[0].get("rationale", "") if len(majority_trials) > 0 else ""
-
-        rows.append({
-            "question_id": qid,
-            "answer_category": acat,
-            "issue_type": row["issue_type"],
-            "semantic_entropy": row["semantic_entropy"],
-            "flip_rate": row["flip_rate"],
-            "expected_verdict": row["expected_verdict"],
-            "majority_verdict": row["majority_verdict"],
-            "answer_type_ner": row.get("answer_type_ner", ""),
-            "n_correct": verdict_counts.get("CORRECT", 0),
-            "n_incorrect": verdict_counts.get("INCORRECT", 0),
-            "n_unsure": verdict_counts.get("UNSURE", 0),
-            "question": eval_row.get("question", ""),
-            "answer": eval_row.get("answer", ""),
-            "ground_truth": eval_row.get("ground_truth", ""),
-            "context_preview": str(eval_row.get("context", ""))[:300],
-            "majority_rationale": sample_rationale,
-        })
-
-    result = pd.DataFrame(rows)
-    logger.info(f"  Mismatch 문항 (expected ≠ majority): {len(result)}건")
-    return result
-
-
-# =============================================================
-# 9. 대표 사례 출력 + 심층 분석 결과 저장
-# =============================================================
-def print_representative_cases(unstable_df: pd.DataFrame, mismatch_df: pd.DataFrame):
-    """대표 사례 콘솔 출력."""
-
-    # --- Unstable Top 5 ---
-    logger.info("\n" + "=" * 60)
-    logger.info("대표 사례: Unstable Top 5 (SE 높은 순)")
-    logger.info("=" * 60)
-    for i, (_, row) in enumerate(unstable_df.head(5).iterrows()):
-        logger.info(f"\n--- [{i+1}] {row['question_id']} / {row['answer_category']} ---")
-        logger.info(f"  Question: {row['question']}")
-        logger.info(f"  Answer: {row['answer']} (GT: {row['ground_truth']})")
-        logger.info(f"  NER Type: {row['answer_type_ner']}")
-        logger.info(f"  SE: {row['semantic_entropy']:.4f}, Flip Rate: {row['flip_rate']:.2f}")
-        logger.info(f"  Verdicts: C={row['n_correct']}, I={row['n_incorrect']}, U={row['n_unsure']}")
-        logger.info(f"  Majority: {row['majority_verdict']} (Expected: {row['expected_verdict']})")
-        if row.get("rationale_CORRECT"):
-            logger.info(f"  [CORRECT 근거]: {row['rationale_CORRECT'][:150]}")
-        if row.get("rationale_INCORRECT"):
-            logger.info(f"  [INCORRECT 근거]: {row['rationale_INCORRECT'][:150]}")
-        if row.get("rationale_UNSURE"):
-            logger.info(f"  [UNSURE 근거]: {row['rationale_UNSURE'][:150]}")
-
-    # --- Mismatch: correct → INCORRECT (SE=0, 체계적 오판) ---
-    systematic = mismatch_df[
-        (mismatch_df["answer_category"] == "correct")
-        & (mismatch_df["majority_verdict"] == "INCORRECT")
-        & (mismatch_df["semantic_entropy"] == 0)
-    ]
-    logger.info(f"\n{'=' * 60}")
-    logger.info(f"대표 사례: 체계적 오판 (correct→INCORRECT, SE=0) — {len(systematic)}건")
-    logger.info("=" * 60)
-    for i, (_, row) in enumerate(systematic.head(5).iterrows()):
-        logger.info(f"\n--- [{i+1}] {row['question_id']} ---")
-        logger.info(f"  Question: {row['question']}")
-        logger.info(f"  Answer (정답): {row['answer']}")
-        logger.info(f"  NER Type: {row['answer_type_ner']}")
-        logger.info(f"  30회 모두 INCORRECT 판정")
-        logger.info(f"  [Judge 근거]: {row['majority_rationale'][:200]}")
-        logger.info(f"  Context: {row['context_preview'][:200]}...")
-
-    # --- Mismatch: correct → UNSURE ---
-    unsure_cases = mismatch_df[
-        (mismatch_df["answer_category"] == "correct")
-        & (mismatch_df["majority_verdict"] == "UNSURE")
-    ]
-    if len(unsure_cases) > 0:
-        logger.info(f"\n{'=' * 60}")
-        logger.info(f"대표 사례: correct→UNSURE — {len(unsure_cases)}건")
-        logger.info("=" * 60)
-        for i, (_, row) in enumerate(unsure_cases.head(3).iterrows()):
-            logger.info(f"\n--- [{i+1}] {row['question_id']} ---")
-            logger.info(f"  Question: {row['question']}")
-            logger.info(f"  Answer (정답): {row['answer']}")
-            logger.info(f"  SE: {row['semantic_entropy']:.4f}")
-            logger.info(f"  Verdicts: C={row['n_correct']}, I={row['n_incorrect']}, U={row['n_unsure']}")
-            logger.info(f"  [Judge 근거]: {row['majority_rationale'][:200]}")
-
-
-def save_deep_results(
-    classified_df: pd.DataFrame,
-    unstable_df: pd.DataFrame,
-    mismatch_df: pd.DataFrame,
-    suffix: str = "",
-):
-    """심층 분석 결과를 CSV + JSON으로 저장."""
-    classified_path = RESULTS_ANALYSIS / f"classified_questions{suffix}.csv"
-    classified_df.to_csv(classified_path, index=False)
-    logger.info(f"  Saved {classified_path}")
-
-    unstable_path = RESULTS_ANALYSIS / f"unstable_details{suffix}.csv"
-    unstable_df.to_csv(unstable_path, index=False)
-    logger.info(f"  Saved {unstable_path}")
-
-    mismatch_path = RESULTS_ANALYSIS / f"mismatch_details{suffix}.csv"
-    mismatch_df.to_csv(mismatch_path, index=False)
-    logger.info(f"  Saved {mismatch_path}")
-
-    # JSON 요약
-    summary = {
-        "total_eval_sets": len(classified_df),
-        "issue_type_distribution": classified_df["issue_type"].value_counts().to_dict(),
-        "unstable_count": int(classified_df["is_unstable"].sum()),
-        "mismatch_count": int(classified_df["is_mismatch"].sum()),
-        "mismatch_subtypes": {
-            "correct→INCORRECT": {
-                "total": int(((classified_df["answer_category"] == "correct")
-                              & (classified_df["majority_verdict"] == "INCORRECT")).sum()),
-                "SE=0": int(((classified_df["answer_category"] == "correct")
-                             & (classified_df["majority_verdict"] == "INCORRECT")
-                             & (classified_df["semantic_entropy"] == 0)).sum()),
-                "SE>0": int(((classified_df["answer_category"] == "correct")
-                             & (classified_df["majority_verdict"] == "INCORRECT")
-                             & (classified_df["semantic_entropy"] > 0)).sum()),
-            },
-            "correct→UNSURE": {
-                "total": int(((classified_df["answer_category"] == "correct")
-                              & (classified_df["majority_verdict"] == "UNSURE")).sum()),
-                "SE=0": int(((classified_df["answer_category"] == "correct")
-                             & (classified_df["majority_verdict"] == "UNSURE")
-                             & (classified_df["semantic_entropy"] == 0)).sum()),
-                "SE>0": int(((classified_df["answer_category"] == "correct")
-                             & (classified_df["majority_verdict"] == "UNSURE")
-                             & (classified_df["semantic_entropy"] > 0)).sum()),
-            },
-        },
-        "per_category": {},
-    }
-    for cat in ["correct", "obvious_wrong", "confusing_wrong"]:
-        sub = classified_df[classified_df["answer_category"] == cat]
-        summary["per_category"][cat] = {
+def save_deep_results(cdf, sfx=""):
+    cdf.to_csv(RESULTS_ANALYSIS / f"classified_b1{sfx}.csv", index=False)
+    summary = {"total": len(cdf)}
+    for pid in sorted(cdf["prompt_id"].unique()):
+        sub = cdf[cdf["prompt_id"] == pid]
+        summary[pid] = {
             "total": len(sub),
-            "stable_correct": int(((~sub["is_unstable"]) & (~sub["is_mismatch"])).sum()),
-            "unstable_only": int((sub["is_unstable"] & (~sub["is_mismatch"])).sum()),
-            "mismatch_only": int(((~sub["is_unstable"]) & sub["is_mismatch"]).sum()),
-            "both": int((sub["is_unstable"] & sub["is_mismatch"]).sum()),
+            **sub["issue_type"].value_counts().to_dict(),
+            "per_category": {}
         }
-
-    summary_path = RESULTS_ANALYSIS / f"deep_analysis_summary{suffix}.json"
-    with open(summary_path, "w", encoding="utf-8") as f:
+        for cat in ["correct", "obvious_wrong", "confusing_wrong"]:
+            cs = sub[sub["answer_category"] == cat]
+            summary[pid]["per_category"][cat] = cs["issue_type"].value_counts().to_dict()
+    with open(RESULTS_ANALYSIS / f"deep_summary_b1{sfx}.json", "w") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
-    logger.info(f"  Saved {summary_path}")
+    logger.info(f"  Deep analysis saved")
 
+# === 9. 요약 출력 ===
+def print_summary(edf, stat_results):
+    logger.info("=" * 60)
+    logger.info("Phase B B1-1 Analysis Summary")
+    logger.info("=" * 60)
+    for pid in sorted(edf["prompt_id"].unique()):
+        sub = edf[edf["prompt_id"] == pid]
+        logger.info(f"\n  [{pid}] (K={sub['verdict_k'].iloc[0]})")
+        logger.info(f"    mean H={sub['semantic_entropy'].mean():.4f}, "
+                     f"mean H_norm={sub['h_norm'].mean():.4f}, "
+                     f"mean flip_rate={sub['flip_rate'].mean():.4f}")
+        unstable = (sub["flip_rate"] > 0).sum()
+        logger.info(f"    unstable: {unstable}/{len(sub)} ({unstable/len(sub)*100:.1f}%)")
+        for cat in ["correct", "obvious_wrong", "confusing_wrong"]:
+            cs = sub[sub["answer_category"] == cat]
+            if len(cs):
+                logger.info(f"    {cat:20s}: H={cs['semantic_entropy'].mean():.4f}, "
+                             f"flip={cs['flip_rate'].mean():.4f}")
 
-# =============================================================
-# Main
-# =============================================================
+# === Main ===
 def main():
-    parser = argparse.ArgumentParser(description="Step 3: Analyze Judge results")
-    parser.add_argument("--smoke", action="store_true", help="Analyze smoke test results")
-    parser.add_argument("--skip-deep", action="store_true", help="Skip deep analysis (Steps 7-9)")
-    parser.add_argument("--config", default="experiment.yaml", help="Config file name")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--skip-deep", action="store_true")
+    parser.add_argument("--config", default="experiment_b1.yaml")
     args = parser.parse_args()
-
     config = load_config(args.config)
-    suffix = "_smoke" if args.smoke else ""
+    sfx = "_smoke" if args.smoke else ""
 
-    # ── Steps 1-6: Entropy 분석 ──────────────────────────────
-    logger.info("=" * 60)
-    logger.info("Steps 1-6: Entropy Analysis")
-    logger.info("=" * 60)
-
-    # 1. 결과 로드
+    # Load
     df = load_results(smoke=args.smoke)
+    meta = load_eval_meta(smoke=args.smoke)
 
-    # 2. 메타데이터 병합
-    meta = load_evaluation_metadata(smoke=args.smoke)
-    df = df.merge(meta[["question_id", "answer_category", "answer_type_ner",
-                         "question_length", "context_length"]],
-                  on=["question_id", "answer_category"], how="left")
+    # Verdict distribution
+    vdf = compute_verdict_distribution(df, config)
 
-    # 3. Verdict 분포
-    verdict_df = compute_verdict_distribution(df)
+    # Semantic Entropy
+    edf = compute_semantic_entropy(vdf)
 
-    # 4. Semantic Entropy + Flip Rate
-    entropy_base = config["analysis"]["entropy_base"]
-    entropy_df = compute_semantic_entropy(verdict_df, base=entropy_base)
+    # Merge metadata
+    merge_cols = ["question_id", "answer_category"]
+    meta_cols = [c for c in ["spacy_label","evidence_present","question_length","context_length"] if c in meta.columns]
+    edf = edf.merge(meta[merge_cols + meta_cols].drop_duplicates(subset=merge_cols),
+                     on=merge_cols, how="left")
 
-    # 메타데이터 병합
-    entropy_df = entropy_df.merge(
-        meta[["question_id", "answer_category", "answer_type_ner",
-              "question_length", "context_length"]],
-        on=["question_id", "answer_category"], how="left"
-    )
+    # Stats
+    stat_results = run_statistical_analysis(edf, config)
+    neg_results = analyze_negativity_bias(edf)
 
-    # 5. 통계 분석
-    stat_results = run_statistical_analysis(entropy_df)
+    # Visualize + Save
+    create_visualizations(edf, sfx=sfx)
+    save_results(edf, stat_results, neg_results, sfx=sfx)
+    print_summary(edf, stat_results)
 
-    # 6. 시각화 + 저장 + 요약
-    logger.info("Creating visualizations...")
-    create_visualizations(entropy_df, suffix=suffix)
-    save_results(entropy_df, stat_results, suffix=suffix)
-    print_summary(entropy_df, stat_results)
-
-    # ── Steps 7-9: 심층 분석 ─────────────────────────────────
+    # Deep analysis
     if not args.skip_deep:
-        logger.info("\n" + "=" * 60)
-        logger.info("Steps 7-9: Deep Analysis")
-        logger.info("=" * 60)
+        cdf = classify_questions(edf)
+        save_deep_results(cdf, sfx=sfx)
 
-        # 7. 분류
-        classified_df = classify_questions(entropy_df)
-        summarize_classification(classified_df)
-
-        # 8. 상세 추출 (evaluation_set 전체 + judge_results 필요)
-        eval_full_df = load_evaluation_full(smoke=args.smoke)
-        judge_df = pd.DataFrame(read_jsonl(
-            RESULTS_LOGS / f"judge_results{suffix}.jsonl"
-        ))
-        judge_df = judge_df[~judge_df["verdict"].isin(["API_ERROR", "PARSE_ERROR"])].copy()
-
-        unstable_df = extract_unstable_details(classified_df, eval_full_df, judge_df)
-        mismatch_df = extract_mismatch_details(classified_df, eval_full_df, judge_df)
-
-        # 9. 대표 사례 + 저장
-        print_representative_cases(unstable_df, mismatch_df)
-        save_deep_results(classified_df, unstable_df, mismatch_df, suffix=suffix)
-
-    logger.info("\nDone! Results saved to results/analysis/")
-
+    logger.info("\nDone!")
 
 if __name__ == "__main__":
     main()
