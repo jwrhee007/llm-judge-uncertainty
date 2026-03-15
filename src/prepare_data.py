@@ -4,10 +4,11 @@ Phase B Step 1: 데이터 준비
 - 태그별 층화 추출 (20개/태그 상한)
 - Evidence-Aware Context Selection
 - Rule-based 오답 생성
+- Context Swap 생성 (B-2: same-type / cross-type)
 
 Usage:
-    python -m src.prepare_data --config experiment_b1.yaml
-    python -m src.prepare_data --config experiment_b1.yaml --smoke
+    python -m src.prepare_data --config experiment_b.yaml
+    python -m src.prepare_data --config experiment_b.yaml --smoke
 """
 from __future__ import annotations
 import argparse, json, random, re, sys
@@ -28,9 +29,11 @@ SPACY_NATIVE_TAGS = [
 ]
 UNTAGGED = "UNTAGGED"
 YEAR_PATTERN = re.compile(r"^\d{4}$")
-NUMBER_PATTERN = re.compile(r"^[\d,]+\.?\d*$")
 
-# === 1. TriviaQA 전수 로드 ===
+
+# =============================================================
+# 1. TriviaQA 전수 로드
+# =============================================================
 def load_triviaqa_all(config: dict) -> list[dict]:
     ds_cfg = config["dataset"]
     logger.info(f"Loading TriviaQA (subset={ds_cfg['subset']}, split={ds_cfg['split']})...")
@@ -49,10 +52,13 @@ def load_triviaqa_all(config: dict) -> list[dict]:
             "_wiki_contexts": item.get("entity_pages", {}).get("wiki_context", []),
             "_search_contexts": item.get("search_results", {}).get("search_context", []),
         })
-    logger.info(f"  After basic filtering: {len(candidates)} questions")
+    logger.info(f"  After basic filtering: {len(candidates)}")
     return candidates
 
-# === 2. spaCy Native NER 태깅 ===
+
+# =============================================================
+# 2. spaCy Native NER 태깅
+# =============================================================
 def tag_answer_types(questions: list[dict], nlp) -> list[dict]:
     logger.info("Tagging answer types with spaCy native NER...")
     for q in questions:
@@ -62,6 +68,7 @@ def tag_answer_types(questions: list[dict], nlp) -> list[dict]:
     for tag, c in counts.most_common():
         logger.info(f"    {tag:15s}: {c:5d}")
     return questions
+
 
 def _tag_single(answer: str, question: str, nlp) -> str:
     context_text = f"{question} The answer is {answer}."
@@ -76,7 +83,10 @@ def _tag_single(answer: str, question: str, nlp) -> str:
             return ent.label_
     return UNTAGGED
 
-# === 3. Evidence-Aware Context Selection ===
+
+# =============================================================
+# 3. Evidence-Aware Context Selection
+# =============================================================
 def select_contexts(questions: list[dict], config: dict) -> list[dict]:
     ds_cfg = config["dataset"]
     ev_cfg = config["evidence"]
@@ -117,9 +127,11 @@ def select_contexts(questions: list[dict], config: dict) -> list[dict]:
     logger.info(f"  Context selected: {len(selected)} (present={n_present}, absent={n_absent})")
     return selected
 
+
 def _truncate(ctx: str, max_words: int) -> str:
     words = ctx.split()
     return " ".join(words[:max_words]) if len(words) > max_words else ctx
+
 
 def _find_evidence_span(context: str, aliases: list[str], ev_cfg: dict) -> dict | None:
     ctx_lower = context.lower()
@@ -140,7 +152,10 @@ def _find_evidence_span(context: str, aliases: list[str], ev_cfg: dict) -> dict 
         return {"start": idx, "end": idx + len(al), "text": context[idx:idx + len(al)]}
     return None
 
-# === 4. 층화 추출 ===
+
+# =============================================================
+# 4. 층화 추출
+# =============================================================
 def stratified_sample(questions: list[dict], config: dict, smoke: bool = False) -> list[dict]:
     max_per = config["smoke_test"]["max_per_tag"] if smoke else config["sampling"]["max_per_tag"]
     rng = random.Random(config["dataset"]["seed"])
@@ -153,12 +168,15 @@ def stratified_sample(questions: list[dict], config: dict, smoke: bool = False) 
         pool = tag_groups[tag]
         chosen = rng.sample(pool, min(len(pool), max_per))
         sampled.extend(chosen)
-        logger.info(f"  {tag:15s}: {len(pool):5d} avail → {len(chosen):3d} sampled")
+        logger.info(f"  {tag:15s}: {len(pool):5d} avail -> {len(chosen):3d} sampled")
     rng.shuffle(sampled)
     logger.info(f"  Total sampled: {len(sampled)}")
     return sampled
 
-# === 5. 오답 생성 ===
+
+# =============================================================
+# 5. 오답 생성
+# =============================================================
 def generate_wrong_answers(questions: list[dict], config: dict) -> list[dict]:
     logger.info("Generating wrong answers...")
     wa_cfg = config["wrong_answers"]
@@ -171,8 +189,13 @@ def generate_wrong_answers(questions: list[dict], config: dict) -> list[dict]:
         a, t = q["answer"], q["spacy_label"]
         q["obvious_wrong"] = _cross_type_swap(a, t, tag_pool, all_tags, rng)
         q["confusing_wrong"] = _confusing_wrong(a, t, tag_pool, wa_cfg, rng)
+    n_f1 = sum(1 for q in questions if q["obvious_wrong"].startswith("[NO_"))
+    n_f2 = sum(1 for q in questions if q["confusing_wrong"].startswith("[NO_"))
+    if n_f1: logger.warning(f"  {n_f1} obvious_wrong failed")
+    if n_f2: logger.warning(f"  {n_f2} confusing_wrong failed")
     logger.info("  Done")
     return questions
+
 
 def _cross_type_swap(answer, tag, tag_pool, all_tags, rng):
     others = [t for t in all_tags if t != tag and tag_pool[t]]
@@ -180,6 +203,7 @@ def _cross_type_swap(answer, tag, tag_pool, all_tags, rng):
     ct = rng.choice(others)
     cands = [a for a in tag_pool[ct] if a != answer]
     return rng.choice(cands) if cands else rng.choice(tag_pool[ct])
+
 
 def _confusing_wrong(answer, tag, tag_pool, wa_cfg, rng):
     np_cfg = wa_cfg["confusing"]["numeric_perturbation"]
@@ -193,6 +217,7 @@ def _confusing_wrong(answer, tag, tag_pool, wa_cfg, rng):
     if p: return p
     all_a = [a for ans in tag_pool.values() for a in ans if a != answer]
     return rng.choice(all_a) if all_a else "[NO_CONFUSING_AVAILABLE]"
+
 
 def _numeric_perturbation(answer, np_cfg, rng):
     s = answer.strip().replace(",", "")
@@ -208,60 +233,168 @@ def _numeric_perturbation(answer, np_cfg, rng):
         return answer.replace(m.group(1), str(max(0, n + rng.choice([-1,1])*rng.choice(np_cfg["year_offsets"]))))
     return None
 
-# === 6. 저장 ===
-def save_dataset(questions, output_name):
+
+# =============================================================
+# 6. Context Swap 생성 (B-2)
+# =============================================================
+def generate_swapped_contexts(questions: list[dict], config: dict) -> tuple[list[dict], list[dict]]:
+    """
+    각 문항에 대해 context를 swap:
+    - same_type: 같은 NER 태그의 다른 문항 context (PKI 유도)
+    - cross_type: 다른 NER 태그의 문항 context (통제 조건)
+    Returns: (same_type_questions, cross_type_questions)
+    """
+    logger.info("Generating swapped contexts for B-2...")
+    rng = random.Random(config["dataset"]["seed"] + 2)
+
+    # 태그별 그룹핑 (context pool)
+    tag_ctx_pool: dict[str, list[dict]] = defaultdict(list)
+    for q in questions:
+        tag_ctx_pool[q["spacy_label"]].append(q)
+    all_tags = list(tag_ctx_pool.keys())
+
+    same_type_qs = []
+    cross_type_qs = []
+
+    for q in questions:
+        qid = q["question_id"]
+        tag = q["spacy_label"]
+
+        # --- Same-type swap ---
+        same_pool = [other for other in tag_ctx_pool[tag] if other["question_id"] != qid]
+        if same_pool:
+            donor = rng.choice(same_pool)
+            same_q = {**q,
+                      "context": donor["context"],
+                      "context_source": f"swap_same:{donor['question_id']}",
+                      "swap_type": "same_type",
+                      "swap_source_qid": donor["question_id"],
+                      "swap_source_tag": donor["spacy_label"],
+                      "evidence_present": False,
+                      "evidence_span_start": None,
+                      "evidence_span_end": None,
+                      "evidence_span_text": None}
+            same_type_qs.append(same_q)
+
+        # --- Cross-type swap ---
+        other_tags = [t for t in all_tags if t != tag and tag_ctx_pool[t]]
+        if other_tags:
+            cross_tag = rng.choice(other_tags)
+            donor = rng.choice(tag_ctx_pool[cross_tag])
+            cross_q = {**q,
+                       "context": donor["context"],
+                       "context_source": f"swap_cross:{donor['question_id']}",
+                       "swap_type": "cross_type",
+                       "swap_source_qid": donor["question_id"],
+                       "swap_source_tag": donor["spacy_label"],
+                       "evidence_present": False,
+                       "evidence_span_start": None,
+                       "evidence_span_end": None,
+                       "evidence_span_text": None}
+            cross_type_qs.append(cross_q)
+
+    logger.info(f"  Same-type swaps: {len(same_type_qs)}")
+    logger.info(f"  Cross-type swaps: {len(cross_type_qs)}")
+    return same_type_qs, cross_type_qs
+
+
+# =============================================================
+# 7. 저장
+# =============================================================
+def save_eval_set(questions: list[dict], output_name: str, include_swap_fields: bool = False) -> Path:
+    """문항 × 3 답변유형을 JSONL로 저장."""
     path = DATA_PROCESSED / output_name
     if path.exists(): path.unlink()
-    c = 0
+    count = 0
     for q in questions:
-        base = {k: q[k] for k in ["question_id","question","context","context_source","spacy_label",
-                "evidence_present","evidence_span_start","evidence_span_end","evidence_span_text"]}
+        base = {k: q[k] for k in [
+            "question_id","question","context","context_source","spacy_label",
+            "evidence_present","evidence_span_start","evidence_span_end","evidence_span_text"
+        ]}
         base["ground_truth"] = q["answer"]
         base["question_length"] = len(q["question"].split())
         base["context_length"] = len(q["context"].split())
+        if include_swap_fields:
+            base["swap_type"] = q.get("swap_type", "")
+            base["swap_source_qid"] = q.get("swap_source_qid", "")
+            base["swap_source_tag"] = q.get("swap_source_tag", "")
         for acat, field in [("correct","answer"),("obvious_wrong","obvious_wrong"),("confusing_wrong","confusing_wrong")]:
             append_jsonl(path, {**base, "answer": q[field], "answer_category": acat})
-            c += 1
-    logger.info(f"Saved {c} eval sets → {path}")
+            count += 1
+    logger.info(f"  Saved {count} eval sets -> {path.name}")
     return path
 
-def save_questions_raw(questions, output_name):
+
+def save_questions_raw(questions: list[dict], output_name: str) -> Path:
     path = DATA_PROCESSED / output_name
     if path.exists(): path.unlink()
     for q in questions:
         append_jsonl(path, {k: v for k, v in q.items() if not k.startswith("_")})
-    logger.info(f"Saved {len(questions)} raw questions → {path}")
+    logger.info(f"  Saved {len(questions)} raw questions -> {path.name}")
+    return path
 
-# === 7. 요약 ===
-def print_summary(questions, config):
+
+# =============================================================
+# 8. 요약
+# =============================================================
+def print_summary(questions, same_qs, cross_qs, config):
     logger.info("=" * 60)
-    logger.info(f"Phase B Dataset: {len(questions)} questions, {len(questions)*3} eval sets")
+    logger.info(f"Phase B Dataset Summary")
     logger.info("=" * 60)
+    logger.info(f"  Questions: {len(questions)}")
     td = Counter(q["spacy_label"] for q in questions)
     ms = config["sampling"]["min_for_stats"]
     for t, c in td.most_common():
-        logger.info(f"  {t:15s}: {c:3d} {'✓' if c >= ms else '⚠ below threshold'}")
+        logger.info(f"    {t:15s}: {c:3d} {'OK' if c >= ms else '(below threshold)'}")
     np_ = sum(1 for q in questions if q["evidence_present"])
-    logger.info(f"  Evidence present: {np_}/{len(questions)}")
+    logger.info(f"  B-1 evidence_present: {np_}/{len(questions)}")
+    logger.info(f"  B-2 same-type swaps:  {len(same_qs)}")
+    logger.info(f"  B-2 cross-type swaps: {len(cross_qs)}")
+    logger.info(f"  Eval sets: B1={len(questions)*3}, B2-same={len(same_qs)*3}, B2-cross={len(cross_qs)*3}")
 
-# === Main ===
+
+# =============================================================
+# Main
+# =============================================================
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Phase B: Prepare all evaluation datasets")
     parser.add_argument("--smoke", action="store_true")
-    parser.add_argument("--config", default="experiment_b1.yaml")
+    parser.add_argument("--config", default="experiment_b.yaml")
     args = parser.parse_args()
     config = load_config(args.config)
+    sfx = "_smoke" if args.smoke else ""
+
+    # 1. 전수 로드
     questions = load_triviaqa_all(config)
+
+    # 2. NER 태깅
     logger.info("Loading spaCy model...")
     nlp = spacy.load("en_core_web_sm")
     questions = tag_answer_types(questions, nlp)
+
+    # 3. Evidence-Aware Context
     questions = select_contexts(questions, config)
+
+    # 4. 층화 추출
     questions = stratified_sample(questions, config, smoke=args.smoke)
+
+    # 5. 오답 생성
     questions = generate_wrong_answers(questions, config)
-    sfx = "_smoke" if args.smoke else ""
-    save_questions_raw(questions, f"questions_b1{sfx}.jsonl")
-    save_dataset(questions, f"evaluation_set_b1{sfx}.jsonl")
-    print_summary(questions, config)
+
+    # 6. Context Swap (B-2)
+    same_qs, cross_qs = generate_swapped_contexts(questions, config)
+
+    # 7. 저장
+    save_questions_raw(questions, f"questions_b{sfx}.jsonl")
+    save_eval_set(questions, f"evaluation_set_b1{sfx}.jsonl", include_swap_fields=False)
+    save_eval_set(same_qs, f"evaluation_set_b2_same{sfx}.jsonl", include_swap_fields=True)
+    save_eval_set(cross_qs, f"evaluation_set_b2_cross{sfx}.jsonl", include_swap_fields=True)
+
+    # 8. 요약
+    print_summary(questions, same_qs, cross_qs, config)
+    logger.info(f"\nDone! Next: python -m src.run_judge_batch auto --experiment b1-1 --config experiment_b.yaml"
+                + (" --smoke" if args.smoke else ""))
+
 
 if __name__ == "__main__":
     main()

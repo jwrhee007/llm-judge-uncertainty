@@ -1,0 +1,110 @@
+# =============================================================
+# LLM-Judge Semantic Uncertainty - Phase B Unified Configuration
+# B-1: Evidence-Present | B-2: Evidence-Absent (Swapped Context)
+# =============================================================
+
+# --- Dataset ---
+dataset:
+  name: "triviaqa"
+  split: "validation"
+  subset: "rc"
+  seed: 43
+  min_context_length: 50
+  max_context_length: 2000
+
+# --- Stratified Sampling ---
+sampling:
+  max_per_tag: 20
+  min_for_stats: 5
+
+# --- Evidence-Aware Context Selection ---
+evidence:
+  match_method: "case_insensitive_substring"
+  short_alias_threshold: 3
+  context_window: 50
+
+# --- Wrong Answer Generation ---
+wrong_answers:
+  obvious:
+    method: "cross_type_swap"
+  confusing:
+    method: "same_type_swap"
+    numeric_perturbation:
+      year_offsets: [1, 5, 10]
+      number_factors: [0.8, 1.2]
+
+# --- Judge Model ---
+judge:
+  model: "gpt-4o-mini"
+  temperature: 0.0
+  seed: 42
+  max_tokens: 300
+  n_trials: 30
+  logprobs: true
+  top_logprobs: 5
+
+# --- Prompts ---
+prompts:
+  active:
+    - "P-Thakur"
+    - "P-CLEV"
+    - "P-Lee-Standard"
+  verdict_k:
+    "P-Thakur": 2
+    "P-CLEV": 3
+    "P-Lee-Standard": 3
+  # B1-2, B2-1, B2-2에서 사용할 단일 프롬프트 (B1-1 결과 후 확정)
+  default_single: "P-Lee-Standard"
+
+# --- Experiment-specific ---
+experiments:
+  b1-1:
+    description: "3-Prompt Comparison + Baseline"
+    eval_set: "evaluation_set_b1.jsonl"
+    use_all_prompts: true
+  b1-2:
+    description: "Attention Dilution (Distractor Scaling)"
+    eval_set: "evaluation_set_b1.jsonl"
+    use_all_prompts: false
+    distractor_levels: [1, 2, 3]
+    distractor_positions: ["front", "back"]
+  b2-1:
+    description: "PKI Verification (Same-Type Context Swap)"
+    eval_set: "evaluation_set_b2_same.jsonl"
+    use_all_prompts: false
+  b2-2:
+    description: "Control (Cross-Type Context Swap)"
+    eval_set: "evaluation_set_b2_cross.jsonl"
+    use_all_prompts: false
+
+# --- API / Batch ---
+api:
+  requests_per_minute: 500
+  max_retries: 5
+  retry_base_delay: 1.0
+  timeout: 30
+
+batch:
+  max_enqueued_tokens: 600000
+  est_tokens_per_request: 3000
+  poll_interval: 30
+  cooldown_between_batches: 90
+
+# --- Smoke Test ---
+smoke_test:
+  max_per_tag: 2
+  n_trials: 3
+
+# --- Analysis ---
+analysis:
+  entropy_base: "natural"
+  pki_markers:
+    - "is indeed"
+    - "is known to be"
+    - "which supports"
+    - "which confirms"
+    - "is widely known"
+    - "is commonly known"
+  output_formats:
+    - "csv"
+    - "png"

@@ -1,0 +1,29 @@
+{
+  "P-CLEV": {
+    "total_correct": 38,
+    "verdict_k": 3,
+    "majority_POSITIVE": 30,
+    "majority_NEGATIVE": 8,
+    "majority_UNCERTAIN": 0,
+    "misclassification_rate": 0.21052631578947367,
+    "negative_bias_ratio": 1.0
+  },
+  "P-Lee-Standard": {
+    "total_correct": 38,
+    "verdict_k": 3,
+    "majority_POSITIVE": 26,
+    "majority_NEGATIVE": 10,
+    "majority_UNCERTAIN": 2,
+    "misclassification_rate": 0.3157894736842105,
+    "negative_bias_ratio": 0.8333333333333334
+  },
+  "P-Thakur": {
+    "total_correct": 38,
+    "verdict_k": 2,
+    "majority_POSITIVE": 36,
+    "majority_NEGATIVE": 2,
+    "majority_UNCERTAIN": 0,
+    "misclassification_rate": 0.05263157894736842,
+    "negative_bias_ratio": 1.0
+  }
+}

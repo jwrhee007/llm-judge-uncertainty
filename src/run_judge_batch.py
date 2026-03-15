@@ -1,43 +1,74 @@
 """
-Phase B Step 2: Judge 반복 샘플링 - 3-Prompt Comparison
-- 3개 프롬프트 × N문항 × 3답변유형 × 30회를 Batch API로 제출
-- 프롬프트별 별도 배치 또는 통합 배치
+Phase B Step 2: Judge Batch API — Experiment-Aware
+- --experiment b1-1: 3-Prompt × baseline (evidence-present)
+- --experiment b2-1: 1-Prompt × same-type swap (PKI verification)
+- --experiment b2-2: 1-Prompt × cross-type swap (control)
 
 Usage:
-    python -m src.run_judge_batch submit --config experiment_b1.yaml
-    python -m src.run_judge_batch submit --config experiment_b1.yaml --smoke
-    python -m src.run_judge_batch status --config experiment_b1.yaml
-    python -m src.run_judge_batch download --config experiment_b1.yaml
-    python -m src.run_judge_batch auto --config experiment_b1.yaml
+    python -m src.run_judge_batch auto --experiment b1-1 --config experiment_b.yaml
+    python -m src.run_judge_batch auto --experiment b2-1 --config experiment_b.yaml
+    python -m src.run_judge_batch auto --experiment b2-2 --config experiment_b.yaml
+    # 모든 실험 순차 실행:
+    python -m src.run_judge_batch auto --experiment all --config experiment_b.yaml
 """
 from __future__ import annotations
 import argparse, json, sys, time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.utils import DATA_PROCESSED, RESULTS_LOGS, append_jsonl, load_config, load_env, read_jsonl, setup_logger
-from src.prompts import get_active_prompts, PARSE_ERROR as LABEL_PARSE_ERROR
+from src.prompts import get_active_prompts, get_prompt, PARSE_ERROR as LABEL_PARSE_ERROR
 
 logger = setup_logger("run_judge_batch")
-BATCH_STATE_FILE = RESULTS_LOGS / "batch_state_b1.json"
 
-# === 1. Batch Input 생성 ===
-def generate_batch_input(config: dict, smoke: bool = False) -> list[Path]:
+
+# =============================================================
+# Experiment → eval_set + prompts 매핑
+# =============================================================
+def resolve_experiment(experiment: str, config: dict, smoke: bool) -> dict:
+    """실험 ID → (eval_set 경로, 프롬프트 목록, 결과 파일명) 반환."""
     sfx = "_smoke" if smoke else ""
-    eval_path = DATA_PROCESSED / f"evaluation_set_b1{sfx}.jsonl"
-    if not eval_path.exists():
-        logger.error(f"Not found: {eval_path}. Run prepare_data first.")
+    exp_cfg = config["experiments"][experiment]
+    eval_file = exp_cfg["eval_set"].replace(".jsonl", f"{sfx}.jsonl")
+    eval_path = DATA_PROCESSED / eval_file
+
+    if exp_cfg.get("use_all_prompts", False):
+        prompts = get_active_prompts(config)
+    else:
+        single_id = config["prompts"]["default_single"]
+        prompts = [get_prompt(single_id)]
+
+    log_name = f"judge_results_{experiment.replace('-','')}{sfx}.jsonl"
+    state_name = f"batch_state_{experiment.replace('-','')}{sfx}.json"
+
+    return {
+        "experiment": experiment,
+        "eval_path": eval_path,
+        "prompts": prompts,
+        "log_path": RESULTS_LOGS / log_name,
+        "state_path": RESULTS_LOGS / state_name,
+        "n_trials": config["smoke_test"]["n_trials"] if smoke else config["judge"]["n_trials"],
+    }
+
+
+# =============================================================
+# 1. Batch Input 생성
+# =============================================================
+def generate_batch_input(exp: dict, config: dict, smoke: bool) -> list[Path]:
+    if not exp["eval_path"].exists():
+        logger.error(f"Not found: {exp['eval_path']}. Run prepare_data first.")
         sys.exit(1)
-    eval_sets = read_jsonl(eval_path)
+    eval_sets = read_jsonl(exp["eval_path"])
     judge_cfg = config["judge"]
     batch_cfg = config["batch"]
-    n_trials = config["smoke_test"]["n_trials"] if smoke else judge_cfg["n_trials"]
-    prompts = get_active_prompts(config)
+    sfx = "_smoke" if smoke else ""
+    exp_tag = exp["experiment"].replace("-", "")
 
     all_requests = []
-    for prompt_def in prompts:
+    for prompt_def in exp["prompts"]:
         pid = prompt_def["id"]
         system_msg = prompt_def["system"].strip()
         user_tpl = prompt_def["user_template"]
@@ -45,7 +76,7 @@ def generate_batch_input(config: dict, smoke: bool = False) -> list[Path]:
             user_msg = user_tpl.format(
                 context=es["context"], question=es["question"], candidate_answer=es["answer"]
             ).strip()
-            for trial in range(1, n_trials + 1):
+            for trial in range(1, exp["n_trials"] + 1):
                 custom_id = f"{pid}|{es['question_id']}|{es['answer_category']}|{trial}"
                 body = {
                     "model": judge_cfg["model"],
@@ -60,20 +91,19 @@ def generate_batch_input(config: dict, smoke: bool = False) -> list[Path]:
                 all_requests.append({"custom_id": custom_id, "method": "POST",
                                      "url": "/v1/chat/completions", "body": body})
 
-    logger.info(f"Total requests: {len(all_requests)} "
-                f"({len(prompts)} prompts × {len(eval_sets)} sets × {n_trials} trials)")
+    logger.info(f"[{exp['experiment']}] {len(all_requests)} requests "
+                f"({len(exp['prompts'])} prompts x {len(eval_sets)} sets x {exp['n_trials']} trials)")
 
-    # 분할
     max_per = max(50, batch_cfg["max_enqueued_tokens"] // batch_cfg["est_tokens_per_request"])
     n_chunks = max(1, (len(all_requests) + max_per - 1) // max_per)
     if n_chunks > 1:
-        logger.info(f"  Splitting into {n_chunks} batches (~{max_per} req each)")
+        logger.info(f"  Splitting into {n_chunks} batches")
 
     paths = []
     for i in range(n_chunks):
         chunk = all_requests[i * max_per:(i + 1) * max_per]
         if not chunk: break
-        p = RESULTS_LOGS / f"batch_input_b1{sfx}_part{i+1}.jsonl"
+        p = RESULTS_LOGS / f"batch_input_{exp_tag}{sfx}_part{i+1}.jsonl"
         if p.exists(): p.unlink()
         for req in chunk:
             append_jsonl(p, req)
@@ -81,8 +111,11 @@ def generate_batch_input(config: dict, smoke: bool = False) -> list[Path]:
         paths.append(p)
     return paths
 
-# === 2. Batch 제출 ===
-def submit_batch(input_path: Path, smoke: bool, part_index: int) -> str:
+
+# =============================================================
+# 2. Batch 제출
+# =============================================================
+def submit_batch(input_path: Path, exp: dict, smoke: bool, part_index: int) -> str:
     load_env(); client = OpenAI()
     logger.info(f"Uploading {input_path.name}...")
     with open(input_path, "rb") as f:
@@ -90,65 +123,79 @@ def submit_batch(input_path: Path, smoke: bool, part_index: int) -> str:
     batch = client.batches.create(
         input_file_id=uploaded.id, endpoint="/v1/chat/completions",
         completion_window="24h",
-        metadata={"experiment": "phase-b-b1-1", "mode": "smoke" if smoke else "full", "part": str(part_index + 1)})
+        metadata={"experiment": exp["experiment"],
+                  "mode": "smoke" if smoke else "full",
+                  "part": str(part_index + 1)})
     logger.info(f"  Batch {batch.id} created (status={batch.status})")
     return batch.id
 
-# === 3. 상태 확인 ===
-def check_status():
-    load_env(); client = OpenAI(); state = _load_state()
+
+# =============================================================
+# 3. 상태 확인
+# =============================================================
+def check_status(exp: dict):
+    load_env(); client = OpenAI()
+    state = _load_state(exp["state_path"])
     if not state:
-        logger.error("No batch state. Run submit first."); sys.exit(1)
+        logger.error("No batch state."); sys.exit(1)
     for entry in state.get("batches", []):
         batch = client.batches.retrieve(entry["batch_id"])
         rc = batch.request_counts
-        logger.info(f"  {entry['batch_id']} [{batch.status}] "
-                     f"{rc.completed}/{rc.total} done, {rc.failed} failed" if rc else f"  {entry['batch_id']} [{batch.status}]")
-        entry["status"] = batch.status
-        entry["output_file_id"] = batch.output_file_id
-        entry["error_file_id"] = batch.error_file_id
-    _save_state(state)
+        prog = f"{rc.completed}/{rc.total}" if rc else "?"
+        logger.info(f"  Part {entry['part']}: {batch.status} ({prog})")
+        entry.update(status=batch.status, output_file_id=batch.output_file_id,
+                     error_file_id=batch.error_file_id)
+    _save_state(state, exp["state_path"])
 
-# === 4. 결과 다운로드 + 파싱 ===
-def download_results(config: dict):
-    load_env(); client = OpenAI(); state = _load_state()
+
+# =============================================================
+# 4. 결과 다운로드 + 파싱
+# =============================================================
+def download_results(exp: dict, config: dict):
+    load_env(); client = OpenAI()
+    state = _load_state(exp["state_path"])
     if not state:
         logger.error("No state."); sys.exit(1)
-    sfx = state.get("suffix", "")
-    log_path = RESULTS_LOGS / f"judge_results_b1{sfx}.jsonl"
+    log_path = exp["log_path"]
     if log_path.exists(): log_path.unlink()
-    prompts_map = {p["id"]: p for p in get_active_prompts(config)}
+
+    prompts_map = {p["id"]: p for p in exp["prompts"]}
     judge_cfg = config["judge"]
-    total_success = total_errors = 0
+    total_s = total_e = 0
+    sfx = state.get("suffix", "")
+    exp_tag = exp["experiment"].replace("-", "")
 
     for entry in state["batches"]:
         batch = client.batches.retrieve(entry["batch_id"])
         if batch.status != "completed":
-            logger.warning(f"  {entry['batch_id']} not completed ({batch.status}), skipping")
+            logger.warning(f"  Part {entry['part']} not completed ({batch.status})")
             continue
         raw_content = client.files.content(batch.output_file_id)
-        raw_path = RESULTS_LOGS / f"batch_output_raw_b1{sfx}_{entry['part']}.jsonl"
+        raw_path = RESULTS_LOGS / f"batch_raw_{exp_tag}{sfx}_{entry['part']}.jsonl"
         raw_path.write_bytes(raw_content.content)
         raw_records = read_jsonl(raw_path)
-        success = errors = 0
+        s = e = 0
         for rec in raw_records:
             cid = rec.get("custom_id", "")
             parts = cid.split("|")
             if len(parts) != 4:
-                errors += 1; continue
+                e += 1; continue
             prompt_id, qid, acat, trial_str = parts
             trial = int(trial_str)
             resp_body = rec.get("response", {}).get("body", {})
             err = rec.get("error")
             if err:
-                append_jsonl(log_path, _error_record(prompt_id, qid, acat, trial, judge_cfg, err))
-                errors += 1; continue
+                append_jsonl(log_path, {
+                    "prompt_id": prompt_id, "question_id": qid, "answer_category": acat,
+                    "trial_number": trial, "verdict": "API_ERROR", "raw_response": "",
+                    "model": judge_cfg["model"],
+                    "timestamp": datetime.now(timezone.utc).isoformat()})
+                e += 1; continue
             choices = resp_body.get("choices", [])
             raw_text = choices[0].get("message", {}).get("content", "") if choices else ""
             logprobs_data = _extract_logprobs(choices[0]) if choices else None
-            # 프롬프트별 파서로 verdict 매핑
             prompt_def = prompts_map.get(prompt_id)
-            unified_verdict = prompt_def["parse_fn"](raw_text) if prompt_def else LABEL_PARSE_ERROR
+            verdict = prompt_def["parse_fn"](raw_text) if prompt_def else LABEL_PARSE_ERROR
             usage = resp_body.get("usage", {})
             append_jsonl(log_path, {
                 "prompt_id": prompt_id, "question_id": qid, "answer_category": acat,
@@ -156,29 +203,23 @@ def download_results(config: dict):
                 "response_id": resp_body.get("id"),
                 "system_fingerprint": resp_body.get("system_fingerprint"),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "verdict": unified_verdict, "raw_response": raw_text,
+                "verdict": verdict, "raw_response": raw_text,
                 "logprobs": logprobs_data,
                 "model": resp_body.get("model", judge_cfg["model"]),
                 "usage_prompt_tokens": usage.get("prompt_tokens"),
                 "usage_completion_tokens": usage.get("completion_tokens"),
             })
-            success += 1
-        logger.info(f"  Part {entry['part']}: {success} ok, {errors} err")
-        total_success += success; total_errors += errors
-    # 요약
+            s += 1
+        logger.info(f"  Part {entry['part']}: {s} ok, {e} err")
+        total_s += s; total_e += e
+
     all_results = read_jsonl(log_path)
-    logger.info(f"\nTotal: {total_success} success, {total_errors} errors")
+    logger.info(f"\nTotal: {total_s} success, {total_e} errors")
     for pid in sorted({r["prompt_id"] for r in all_results}):
         sub = [r for r in all_results if r["prompt_id"] == pid]
         vc = Counter(r["verdict"] for r in sub)
         logger.info(f"  {pid}: {dict(vc)}")
 
-def _error_record(pid, qid, acat, trial, judge_cfg, err):
-    return {"prompt_id": pid, "question_id": qid, "answer_category": acat,
-            "trial_number": trial, "seed": judge_cfg["seed"],
-            "verdict": "API_ERROR", "raw_response": "", "logprobs": None,
-            "model": judge_cfg["model"], "timestamp": datetime.now(timezone.utc).isoformat(),
-            "parse_error": json.dumps(err)}
 
 def _extract_logprobs(choice: dict) -> dict | None:
     lp = choice.get("logprobs")
@@ -191,24 +232,27 @@ def _extract_logprobs(choice: dict) -> dict | None:
         tokens.append(td)
     return {"tokens": tokens}
 
-# === 5. Auto (submit → poll → download) ===
-def auto_run(config: dict, smoke: bool, poll_interval: int):
-    sfx = "_smoke" if smoke else ""
-    input_paths = generate_batch_input(config, smoke=smoke)
+
+# =============================================================
+# 5. Auto
+# =============================================================
+def auto_run(exp: dict, config: dict, smoke: bool, poll_interval: int):
+    input_paths = generate_batch_input(exp, config, smoke)
     batch_entries = []
     cooldown = config["batch"]["cooldown_between_batches"]
     for i, path in enumerate(input_paths):
-        bid = submit_batch(path, smoke=smoke, part_index=i)
+        bid = submit_batch(path, exp, smoke, i)
         batch_entries.append({"batch_id": bid, "part": i + 1, "status": "submitted"})
         if i < len(input_paths) - 1:
             logger.info(f"Cooldown {cooldown}s..."); time.sleep(cooldown)
-    _save_state({"batches": batch_entries, "suffix": sfx, "smoke": smoke})
-    # 폴링
+    sfx = "_smoke" if smoke else ""
+    _save_state({"batches": batch_entries, "suffix": sfx, "smoke": smoke}, exp["state_path"])
+
     load_env(); client = OpenAI()
     while True:
         all_done = True
         for entry in batch_entries:
-            if entry["status"] in ("completed", "failed", "expired", "cancelled"): continue
+            if entry["status"] in ("completed","failed","expired","cancelled"): continue
             batch = client.batches.retrieve(entry["batch_id"])
             entry["status"] = batch.status
             entry["output_file_id"] = batch.output_file_id
@@ -216,41 +260,61 @@ def auto_run(config: dict, smoke: bool, poll_interval: int):
             rc = batch.request_counts
             prog = f"{rc.completed}/{rc.total}" if rc else "?"
             logger.info(f"  Part {entry['part']}: {batch.status} ({prog})")
-            if batch.status not in ("completed", "failed", "expired", "cancelled"):
+            if batch.status not in ("completed","failed","expired","cancelled"):
                 all_done = False
-        _save_state({"batches": batch_entries, "suffix": sfx, "smoke": smoke})
+        _save_state({"batches": batch_entries, "suffix": sfx, "smoke": smoke}, exp["state_path"])
         if all_done: break
         time.sleep(poll_interval)
-    download_results(config)
+    download_results(exp, config)
 
-# === State management ===
-def _save_state(state):
-    with open(BATCH_STATE_FILE, "w") as f: json.dump(state, f, indent=2, ensure_ascii=False)
-def _load_state():
-    if not BATCH_STATE_FILE.exists(): return None
-    with open(BATCH_STATE_FILE) as f: return json.load(f)
 
-# === Main ===
+# === State ===
+def _save_state(state, path):
+    with open(path, "w") as f: json.dump(state, f, indent=2, ensure_ascii=False)
+def _load_state(path):
+    if not path.exists(): return None
+    with open(path) as f: return json.load(f)
+
+
+# =============================================================
+# Main
+# =============================================================
+EXPERIMENTS = ["b1-1", "b2-1", "b2-2"]
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["submit","status","download","auto"])
+    parser.add_argument("--experiment", required=True, choices=EXPERIMENTS + ["all"])
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--poll-interval", type=int, default=30)
-    parser.add_argument("--config", default="experiment_b1.yaml")
+    parser.add_argument("--config", default="experiment_b.yaml")
     args = parser.parse_args()
     config = load_config(args.config)
     if args.smoke: logger.info("[SMOKE TEST MODE]")
-    if args.command == "submit":
-        paths = generate_batch_input(config, smoke=args.smoke)
-        entries = []
-        for i, p in enumerate(paths):
-            bid = submit_batch(p, smoke=args.smoke, part_index=i)
-            entries.append({"batch_id": bid, "part": i+1, "status": "submitted"})
-        sfx = "_smoke" if args.smoke else ""
-        _save_state({"batches": entries, "suffix": sfx, "smoke": args.smoke})
-    elif args.command == "status": check_status()
-    elif args.command == "download": download_results(config)
-    elif args.command == "auto": auto_run(config, smoke=args.smoke, poll_interval=args.poll_interval)
+
+    exps = EXPERIMENTS if args.experiment == "all" else [args.experiment]
+
+    for exp_id in exps:
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Experiment: {exp_id}")
+        logger.info(f"{'='*60}")
+        exp = resolve_experiment(exp_id, config, args.smoke)
+
+        if args.command == "submit":
+            paths = generate_batch_input(exp, config, args.smoke)
+            entries = []
+            for i, p in enumerate(paths):
+                bid = submit_batch(p, exp, args.smoke, i)
+                entries.append({"batch_id": bid, "part": i+1, "status": "submitted"})
+            sfx = "_smoke" if args.smoke else ""
+            _save_state({"batches": entries, "suffix": sfx, "smoke": args.smoke}, exp["state_path"])
+        elif args.command == "status":
+            check_status(exp)
+        elif args.command == "download":
+            download_results(exp, config)
+        elif args.command == "auto":
+            auto_run(exp, config, smoke=args.smoke, poll_interval=args.poll_interval)
+
 
 if __name__ == "__main__":
     main()

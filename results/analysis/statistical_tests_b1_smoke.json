@@ -1,0 +1,183 @@
+{
+  "h_norm_vs_prompt": {
+    "test": "Kruskal-Wallis",
+    "statistic": 9.62923872994514,
+    "p_value": 0.008110308557974656,
+    "group_means": {
+      "P-CLEV": 0.005082282142856973,
+      "P-Lee-Standard": 0.04574053928571276,
+      "P-Thakur": 0.01611045322902613
+    }
+  },
+  "entropy_vs_category_P-CLEV": {
+    "test": "Kruskal-Wallis",
+    "statistic": 1.9999999999998894,
+    "p_value": 0.36787944117146276,
+    "group_means": {
+      "confusing_wrong": 0.0,
+      "correct": 0.016750372849863495,
+      "obvious_wrong": 0.0
+    }
+  },
+  "entropy_vs_category_P-Lee-Standard": {
+    "test": "Kruskal-Wallis",
+    "statistic": 0.0,
+    "p_value": 1.0,
+    "group_means": {
+      "confusing_wrong": 0.05025111854959048,
+      "correct": 0.05025111854959048,
+      "obvious_wrong": 0.05025111854959048
+    }
+  },
+  "entropy_vs_category_P-Thakur": {
+    "test": "Kruskal-Wallis",
+    "statistic": 4.0357142857151596,
+    "p_value": 0.13294003157473225,
+    "group_means": {
+      "confusing_wrong": 0.0,
+      "correct": 0.03350074569972699,
+      "obvious_wrong": 0.0
+    }
+  },
+  "entropy_vs_ner_P-CLEV": {
+    "test": "Kruskal-Wallis",
+    "statistic": 18.000000000001183,
+    "p_value": 0.4556526043223413,
+    "tags_tested": [
+      "MONEY",
+      "FAC",
+      "ORDINAL",
+      "PRODUCT",
+      "DATE",
+      "GPE",
+      "EVENT",
+      "LAW",
+      "LANGUAGE",
+      "CARDINAL",
+      "LOC",
+      "PERSON",
+      "TIME",
+      "QUANTITY",
+      "WORK_OF_ART",
+      "UNTAGGED",
+      "PERCENT",
+      "NORP",
+      "ORG"
+    ],
+    "group_means": {
+      "MONEY": 0.0,
+      "FAC": 0.0,
+      "ORDINAL": 0.0,
+      "PRODUCT": 0.0,
+      "DATE": 0.0,
+      "GPE": 0.10608569471580213,
+      "EVENT": 0.0,
+      "LAW": 0.0,
+      "LANGUAGE": 0.0,
+      "CARDINAL": 0.0,
+      "LOC": 0.0,
+      "PERSON": 0.0,
+      "TIME": 0.0,
+      "QUANTITY": 0.0,
+      "WORK_OF_ART": 0.0,
+      "UNTAGGED": 0.0,
+      "PERCENT": 0.0,
+      "NORP": 0.0,
+      "ORG": 0.0
+    }
+  },
+  "entropy_vs_ner_P-Lee-Standard": {
+    "test": "Kruskal-Wallis",
+    "statistic": 24.393650793650977,
+    "p_value": 0.1425494646823945,
+    "tags_tested": [
+      "MONEY",
+      "FAC",
+      "ORDINAL",
+      "PRODUCT",
+      "DATE",
+      "GPE",
+      "EVENT",
+      "LAW",
+      "LANGUAGE",
+      "CARDINAL",
+      "LOC",
+      "PERSON",
+      "TIME",
+      "QUANTITY",
+      "WORK_OF_ART",
+      "UNTAGGED",
+      "PERCENT",
+      "NORP",
+      "ORG"
+    ],
+    "group_means": {
+      "MONEY": 0.0,
+      "FAC": 0.0,
+      "ORDINAL": 0.0,
+      "PRODUCT": 0.0,
+      "DATE": 0.0,
+      "GPE": 0.10608569471580213,
+      "EVENT": 0.0,
+      "LAW": 0.21217138943160427,
+      "LANGUAGE": 0.10608569471580213,
+      "CARDINAL": 0.0,
+      "LOC": 0.0,
+      "PERSON": 0.21217138943160427,
+      "TIME": 0.10608569471580213,
+      "QUANTITY": 0.0,
+      "WORK_OF_ART": 0.0,
+      "UNTAGGED": 0.0,
+      "PERCENT": 0.0,
+      "NORP": 0.21217138943160427,
+      "ORG": 0.0
+    }
+  },
+  "entropy_vs_ner_P-Thakur": {
+    "test": "Kruskal-Wallis",
+    "statistic": 17.151785714285854,
+    "p_value": 0.5126935346065961,
+    "tags_tested": [
+      "MONEY",
+      "FAC",
+      "ORDINAL",
+      "PRODUCT",
+      "DATE",
+      "GPE",
+      "EVENT",
+      "LAW",
+      "LANGUAGE",
+      "CARDINAL",
+      "LOC",
+      "PERSON",
+      "TIME",
+      "QUANTITY",
+      "WORK_OF_ART",
+      "UNTAGGED",
+      "PERCENT",
+      "NORP",
+      "ORG"
+    ],
+    "group_means": {
+      "MONEY": 0.0,
+      "FAC": 0.10608569471580213,
+      "ORDINAL": 0.0,
+      "PRODUCT": 0.0,
+      "DATE": 0.0,
+      "GPE": 0.0,
+      "EVENT": 0.0,
+      "LAW": 0.0,
+      "LANGUAGE": 0.0,
+      "CARDINAL": 0.0,
+      "LOC": 0.10608569471580213,
+      "PERSON": 0.0,
+      "TIME": 0.0,
+      "QUANTITY": 0.0,
+      "WORK_OF_ART": 0.0,
+      "UNTAGGED": 0.0,
+      "PERCENT": 0.0,
+      "NORP": 0.0,
+      "ORG": 0.0
+    }
+  }
+}
