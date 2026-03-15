@@ -1,0 +1,65 @@
+{
+  "total": 342,
+  "P-CLEV": {
+    "total": 114,
+    "stable_correct": 105,
+    "mismatch_only": 8,
+    "unstable_only": 1,
+    "per_category": {
+      "correct": {
+        "stable_correct": 29,
+        "mismatch_only": 8,
+        "unstable_only": 1
+      },
+      "obvious_wrong": {
+        "stable_correct": 38
+      },
+      "confusing_wrong": {
+        "stable_correct": 38
+      }
+    }
+  },
+  "P-Lee-Standard": {
+    "total": 114,
+    "stable_correct": 71,
+    "mismatch_only": 37,
+    "both": 3,
+    "unstable_only": 3,
+    "per_category": {
+      "correct": {
+        "stable_correct": 27,
+        "mismatch_only": 9,
+        "both": 1,
+        "unstable_only": 1
+      },
+      "obvious_wrong": {
+        "mismatch_only": 19,
+        "stable_correct": 18,
+        "both": 1
+      },
+      "confusing_wrong": {
+        "stable_correct": 26,
+        "mismatch_only": 9,
+        "unstable_only": 2,
+        "both": 1
+      }
+    }
+  },
+  "P-Thakur": {
+    "total": 114,
+    "stable_correct": 111,
+    "mismatch_only": 3,
+    "per_category": {
+      "correct": {
+        "stable_correct": 35,
+        "mismatch_only": 3
+      },
+      "obvious_wrong": {
+        "stable_correct": 38
+      },
+      "confusing_wrong": {
+        "stable_correct": 38
+      }
+    }
+  }
+}

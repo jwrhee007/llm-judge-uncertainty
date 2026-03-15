@@ -1,0 +1,26 @@
+{
+  "P-CLEV": {
+    "total": 38,
+    "POSITIVE": 30,
+    "NEGATIVE": 8,
+    "UNCERTAIN": 0,
+    "misclass_rate": 0.21052631578947367,
+    "neg_bias_ratio": 1.0
+  },
+  "P-Lee-Standard": {
+    "total": 38,
+    "POSITIVE": 28,
+    "NEGATIVE": 8,
+    "UNCERTAIN": 2,
+    "misclass_rate": 0.2631578947368421,
+    "neg_bias_ratio": 0.8
+  },
+  "P-Thakur": {
+    "total": 38,
+    "POSITIVE": 35,
+    "NEGATIVE": 3,
+    "UNCERTAIN": 0,
+    "misclass_rate": 0.07894736842105263,
+    "neg_bias_ratio": 1.0
+  }
+}

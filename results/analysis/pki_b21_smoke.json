@@ -1,0 +1,107 @@
+{
+  "P-Lee-Standard": {
+    "pki_rate": 0.0,
+    "correct_total": 38,
+    "correct_pki": 0,
+    "wrong_total": 76,
+    "wrong_pki": 0,
+    "pki_markers": {},
+    "pki_by_tag": {
+      "MONEY": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "FAC": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "ORDINAL": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "PRODUCT": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "DATE": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "GPE": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "EVENT": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "LAW": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "LANGUAGE": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "CARDINAL": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "LOC": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "PERSON": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "TIME": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "QUANTITY": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "WORK_OF_ART": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "UNTAGGED": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "PERCENT": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "NORP": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      },
+      "ORG": {
+        "total": 2,
+        "pki": 0,
+        "rate": 0.0
+      }
+    }
+  }
+}

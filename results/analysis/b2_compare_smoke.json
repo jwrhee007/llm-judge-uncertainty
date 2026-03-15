@@ -1,0 +1,37 @@
+{
+  "prompt": "P-Lee-Standard",
+  "b2-1": {
+    "n_paired": 38,
+    "b1_positive": 28,
+    "b2_positive": 0,
+    "verdict_shift": {
+      "NEGATIVE": {
+        "NEGATIVE": 7,
+        "POSITIVE": 20,
+        "UNCERTAIN": 0
+      },
+      "UNCERTAIN": {
+        "NEGATIVE": 1,
+        "POSITIVE": 8,
+        "UNCERTAIN": 2
+      }
+    }
+  },
+  "b2-2": {
+    "n_paired": 38,
+    "b1_positive": 28,
+    "b2_positive": 0,
+    "verdict_shift": {
+      "NEGATIVE": {
+        "NEGATIVE": 6,
+        "POSITIVE": 18,
+        "UNCERTAIN": 0
+      },
+      "UNCERTAIN": {
+        "NEGATIVE": 2,
+        "POSITIVE": 10,
+        "UNCERTAIN": 2
+      }
+    }
+  }
+}

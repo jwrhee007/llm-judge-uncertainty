@@ -1,0 +1,183 @@
+{
+  "h_norm_vs_prompt": {
+    "test": "Kruskal-Wallis",
+    "H": 9.015778251600338,
+    "p": 0.011021701062293986,
+    "means": {
+      "P-CLEV": 0.005082282142856973,
+      "P-Lee-Standard": 0.03049369285714184,
+      "P-Thakur": 0.0
+    }
+  },
+  "SE_vs_cat_P-CLEV": {
+    "test": "Kruskal-Wallis",
+    "H": 1.9999999999998894,
+    "p": 0.36787944117146276,
+    "means": {
+      "confusing_wrong": 0.0,
+      "correct": 0.016750372849863495,
+      "obvious_wrong": 0.0
+    }
+  },
+  "SE_vs_cat_P-Lee-Standard": {
+    "test": "Kruskal-Wallis",
+    "H": 1.0462962962962368,
+    "p": 0.5926518522169824,
+    "means": {
+      "confusing_wrong": 0.05025111854959048,
+      "correct": 0.03350074569972699,
+      "obvious_wrong": 0.016750372849863495
+    }
+  },
+  "SE_vs_cat_P-Thakur": {
+    "test": "Kruskal-Wallis",
+    "H": NaN,
+    "p": NaN,
+    "means": {
+      "confusing_wrong": 0.0,
+      "correct": 0.0,
+      "obvious_wrong": 0.0
+    }
+  },
+  "SE_vs_ner_P-CLEV": {
+    "test": "Kruskal-Wallis",
+    "H": 18.000000000001183,
+    "p": 0.4556526043223413,
+    "tags": [
+      "MONEY",
+      "FAC",
+      "ORDINAL",
+      "PRODUCT",
+      "DATE",
+      "GPE",
+      "EVENT",
+      "LAW",
+      "LANGUAGE",
+      "CARDINAL",
+      "LOC",
+      "PERSON",
+      "TIME",
+      "QUANTITY",
+      "WORK_OF_ART",
+      "UNTAGGED",
+      "PERCENT",
+      "NORP",
+      "ORG"
+    ],
+    "means": {
+      "MONEY": 0.0,
+      "FAC": 0.0,
+      "ORDINAL": 0.0,
+      "PRODUCT": 0.0,
+      "DATE": 0.0,
+      "GPE": 0.10608569471580213,
+      "EVENT": 0.0,
+      "LAW": 0.0,
+      "LANGUAGE": 0.0,
+      "CARDINAL": 0.0,
+      "LOC": 0.0,
+      "PERSON": 0.0,
+      "TIME": 0.0,
+      "QUANTITY": 0.0,
+      "WORK_OF_ART": 0.0,
+      "UNTAGGED": 0.0,
+      "PERCENT": 0.0,
+      "NORP": 0.0,
+      "ORG": 0.0
+    }
+  },
+  "SE_vs_ner_P-Lee-Standard": {
+    "test": "Kruskal-Wallis",
+    "H": 20.228395061728385,
+    "p": 0.32010906209638734,
+    "tags": [
+      "MONEY",
+      "FAC",
+      "ORDINAL",
+      "PRODUCT",
+      "DATE",
+      "GPE",
+      "EVENT",
+      "LAW",
+      "LANGUAGE",
+      "CARDINAL",
+      "LOC",
+      "PERSON",
+      "TIME",
+      "QUANTITY",
+      "WORK_OF_ART",
+      "UNTAGGED",
+      "PERCENT",
+      "NORP",
+      "ORG"
+    ],
+    "means": {
+      "MONEY": 0.0,
+      "FAC": 0.0,
+      "ORDINAL": 0.0,
+      "PRODUCT": 0.0,
+      "DATE": 0.0,
+      "GPE": 0.0,
+      "EVENT": 0.0,
+      "LAW": 0.10608569471580213,
+      "LANGUAGE": 0.0,
+      "CARDINAL": 0.21217138943160427,
+      "LOC": 0.0,
+      "PERSON": 0.10608569471580213,
+      "TIME": 0.10608569471580213,
+      "QUANTITY": 0.0,
+      "WORK_OF_ART": 0.0,
+      "UNTAGGED": 0.0,
+      "PERCENT": 0.0,
+      "NORP": 0.10608569471580213,
+      "ORG": 0.0
+    }
+  },
+  "SE_vs_ner_P-Thakur": {
+    "test": "Kruskal-Wallis",
+    "H": NaN,
+    "p": NaN,
+    "tags": [
+      "MONEY",
+      "FAC",
+      "ORDINAL",
+      "PRODUCT",
+      "DATE",
+      "GPE",
+      "EVENT",
+      "LAW",
+      "LANGUAGE",
+      "CARDINAL",
+      "LOC",
+      "PERSON",
+      "TIME",
+      "QUANTITY",
+      "WORK_OF_ART",
+      "UNTAGGED",
+      "PERCENT",
+      "NORP",
+      "ORG"
+    ],
+    "means": {
+      "MONEY": 0.0,
+      "FAC": 0.0,
+      "ORDINAL": 0.0,
+      "PRODUCT": 0.0,
+      "DATE": 0.0,
+      "GPE": 0.0,
+      "EVENT": 0.0,
+      "LAW": 0.0,
+      "LANGUAGE": 0.0,
+      "CARDINAL": 0.0,
+      "LOC": 0.0,
+      "PERSON": 0.0,
+      "TIME": 0.0,
+      "QUANTITY": 0.0,
+      "WORK_OF_ART": 0.0,
+      "UNTAGGED": 0.0,
+      "PERCENT": 0.0,
+      "NORP": 0.0,
+      "ORG": 0.0
+    }
+  }
+}
